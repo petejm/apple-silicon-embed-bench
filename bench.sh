@@ -37,17 +37,20 @@ print(json.dumps(d))
 ' "$STATUS_FILE"
 }
 
-# Computed at runtime so forks don't lie to their users
+# Canonical upstream — where the pre-built model artifact lives. Always
+# hits petejm/apple-silicon-embed-bench because forks don't republish the
+# .mlpackage release asset.
+UPSTREAM_REPO="petejm/apple-silicon-embed-bench"
+
+# Submission URL (printed at the end). Forks want their own issues, so
+# compute this from the local git remote. Falls back to upstream if not a
+# GitHub remote.
 REMOTE_URL=$(git config --get remote.origin.url 2>/dev/null || echo "")
-if [[ "$REMOTE_URL" == *"github.com"* ]]; then
-  case "$REMOTE_URL" in
-    git@github.com:*) GH_REPO="${REMOTE_URL#git@github.com:}"; GH_REPO="${GH_REPO%.git}" ;;
-    https://github.com/*) GH_REPO="${REMOTE_URL#https://github.com/}"; GH_REPO="${GH_REPO%.git}" ;;
-    *) GH_REPO="petejm/apple-silicon-embed-bench" ;;
-  esac
-else
-  GH_REPO="petejm/apple-silicon-embed-bench"
-fi
+case "$REMOTE_URL" in
+  git@github.com:*) GH_REPO="${REMOTE_URL#git@github.com:}"; GH_REPO="${GH_REPO%.git}" ;;
+  https://github.com/*) GH_REPO="${REMOTE_URL#https://github.com/}"; GH_REPO="${GH_REPO%.git}" ;;
+  *) GH_REPO="$UPSTREAM_REPO" ;;
+esac
 
 # Pinned artifact SHAs — every machine should compute against byte-identical inputs.
 GGUF_SHA256="f0b2fef971e8366438bfd2d9aefea1b0115919389448806d290237f638bae999"
@@ -129,7 +132,7 @@ if [ ! -d "$MLPKG_DIR" ]; then
     mkdir -p models
     tarball=models/bge-small-en-v1.5.mlpackage.tar.gz
     curl -L --fail -o "$tarball" \
-      "https://github.com/${GH_REPO}/releases/download/v0.1.0/bge-small-en-v1.5.mlpackage.tar.gz" \
+      "https://github.com/${UPSTREAM_REPO}/releases/download/v0.1.0/bge-small-en-v1.5.mlpackage.tar.gz" \
       || { echo "ERROR: mlpackage download failed."; echo "  Try REBUILD_MLPACKAGE=1 ./bench.sh, or report the issue."; exit 1; }
     got=$(shasum -a 256 "$tarball" | awk '{print $1}')
     if [ "$got" != "$MLPACKAGE_TARBALL_SHA256" ]; then
