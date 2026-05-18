@@ -21,11 +21,11 @@ Conclusions apply to **this stack**, not to ANE / GPU / Metal in general. PR wel
 
 - CoreML ANE: ~89 sent/s
 - CoreML CPU: ~59 sent/s
-- CoreML GPU: 464-565 sent/s
-- llama.cpp Metal: 197-1567 sent/s (depends on seq len, batched internally)
-- **MLX-embeddings: 282-6950 sent/s** (dominates at short/medium)
+- CoreML GPU: 464-572 sent/s
+- llama.cpp Metal: 199-1,176 sent/s (depends on seq len, batched internally)
+- **MLX-embeddings: 325-3,099 sent/s** (dominates at short/medium)
 
-llama.cpp's BERT-embed Metal path is leaving 4-7× perf on the table vs MLX on identical hardware running the same model. That gap is the tractable upstream optimization opportunity that fell out of this work.
+llama.cpp's BERT-embed Metal path is leaving 2.6-3.3× perf on the table vs MLX on identical hardware running the same model. That gap is the tractable upstream optimization opportunity that fell out of this work.
 
 ## Setup
 
@@ -68,17 +68,21 @@ Repeated `./bench.sh` 10 times back-to-back on the same M5 Max MacBook to charac
 
 Per-run raw data preserved in the `runs/` subdirectory of the test workspace.
 
+**Independent corroboration of MLX b=100**: 3,099 sent/s × 32 tok = 99K real tokens/sec. At ~6.5 GFLOPs/sentence forward, that's ~20 TFLOPS sustained. M5 Max GPU FP16 peak is approximately 30-50 TFLOPS — putting MLX at 40-67% of theoretical peak, which is plausible for a fused-attention implementation. The number passes a basic sanity check. We have not independently verified the measurement against a second framework on this exact workload; doing so is on the open-issues list.
+
 ## Results
 
 ### Sentences/second (higher is better)
 
 | Backend | short b=1 | short batched | medium b=1 | medium batched | long b=1 | long batched | Cold (s) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| CoreML ANE (seq=512 fixed) | 89.0 | — | 89.0 | — | 89.0 | — | 1.45 |
-| CoreML GPU (seq=512 fixed) | 564.5 | — | 546.5 | — | 464.3 | — | 1.57 |
-| CoreML CPU (seq=512 fixed) | 58.2 | — | 58.6 | — | 58.5 | — | 0.22 |
-| MLX-embeddings | 561.1 | **6,949.6** | 523.2 | **1,747.2** | 287.7 | 282.0 | 1.19 |
-| llama.cpp Metal (n_seq~66 internally) | — | **1,567** | — | **597** | — | 197 | — |
+| CoreML ANE (seq=512 fixed) | 89.4 | — | 89.0 | — | 89.0 | — | 1.45 |
+| CoreML GPU (seq=512 fixed) | 572 | — | 562 | — | 564 | — | 1.57 |
+| CoreML CPU (seq=512 fixed) | 59 | — | 59 | — | 59 | — | 0.22 |
+| MLX-embeddings | 562 | **3,099** | 528 | **1,647** | 329 | 325 | 1.19 |
+| llama.cpp Metal (n_seq~66 internally) | — | **1,176** | — | **500** | — | 199 | — |
+
+These are the 10-run means from the variance sweep above; reproduce on your own hardware via `./bench.sh`.
 
 Notes:
 - ANE row uses fixed seq=512 padding (the only ANE-compatible form for fixed-shape transformers).
@@ -105,19 +109,19 @@ This is the only legitimate niche for a CoreML embedding path — long-doc embed
 
 ### Finding 1: ANE is not the embedding accelerator we hoped
 
-At every measured seq length on M5 Max, ANE runs bge-small at ~89 sentences/sec. CoreML GPU on the same model is 5-6× faster. llama.cpp Metal at short batched is 17× faster. MLX-embeddings batched is 78× faster. **ANE is the slowest GPU-class device on this chip for transformer embedding inference.**
+At every measured seq length on M5 Max, ANE runs bge-small at ~89 sentences/sec. CoreML GPU on the same model is ~6× faster. llama.cpp Metal at short batched is ~13× faster. MLX-embeddings batched is ~35× faster. **ANE is the slowest GPU-class device on this chip for transformer embedding inference.**
 
 This is the opposite of the widely-held belief that ANE is the "fast efficient path" for inference on Apple silicon. ANE's strengths are vision models (CNNs, ViTs at int8) and small fixed-shape encoders like Whisper. For text-embedding transformers in FP16, it underperforms the GPU.
 
 ### Finding 2: MLX is the actual fast path on Apple silicon
 
-MLX-embeddings hits ~7K sent/s on short batched workloads — 4.4× faster than llama.cpp Metal and 12× faster than CoreML GPU on the same model. MLX is Apple's first-party ML framework, actively developed, uses Metal kernels with aggressive fusion. It bypasses the CoreML graph-compile layer (no .mlpackage required) and gets straight to optimal Metal shaders.
+MLX-embeddings hits ~3.1K sent/s on short batched workloads — 2.6× faster than llama.cpp Metal and 5.4× faster than CoreML GPU on the same model. MLX is Apple's first-party ML framework, actively developed, uses Metal kernels with aggressive fusion. It bypasses the CoreML graph-compile layer (no .mlpackage required) and gets straight to optimal Metal shaders.
 
 If you want to ship the fastest embedding path on Apple silicon today, you wrap MLX or you out-engineer MLX's Metal kernels. CoreML is a detour.
 
-### Finding 3: llama.cpp's Metal embedding path is leaving 4-7× on the table — *partly closeable, partly Apple's API state*
+### Finding 3: llama.cpp's Metal embedding path is leaving 2.6-3.3× on the table — *partly closeable, partly Apple's API state*
 
-On the same hardware running the same model, MLX is 4-7× faster than llama.cpp's Metal embedding path at extreme batched workloads (100-in-one-call).
+On the same hardware running the same model, MLX is 2.6-3.3× faster than llama.cpp's Metal embedding path at batched workloads (100-in-one-call). Per bucket: 2.6× short, **3.3× medium** (largest), 1.6× long. The gap shape (largest at medium, not short) is notable — see Phase 1 hypothesis discussion in the PRP; it strengthens the ubatch-sizing hypothesis and weakens the kernel-fusion-at-short hypothesis.
 
 **Important caveat — the gap is partly Apple's API exposure, not fully closeable in llama.cpp code.** The Metal init log on macOS 26.5 + brew build 9150 reports `has tensor = false`. Apple's M5 tensor accelerators are temporarily disabled in this build of llama.cpp; MLX uses them. A future llama.cpp release that re-enables tensor units (whisper.cpp b8920 era) may shrink this gap substantially before any kernel work happens.
 

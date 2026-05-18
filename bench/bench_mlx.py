@@ -12,12 +12,18 @@ def main():
     from mlx_embeddings.utils import load, generate
     import mlx.core as mx
     materialize = mx.eval  # MLX tensor materialization; see README "MLX is lazy"
-    # load() takes no revision arg in mlx-embeddings 0.1.0; pin via HF cache by
-    # explicitly downloading the pinned revision first.
+    # load() takes no revision arg in mlx-embeddings 0.1.0; pin by downloading
+    # the exact revision via snapshot_download and passing the returned path
+    # directly to load(). Capturing the path is load-bearing: if the HF cache
+    # already has a different revision (from another tool's prior install),
+    # `load("BAAI/bge-small-en-v1.5")` would silently use whatever is on disk
+    # rather than the revision we just pinned.
     from huggingface_hub import snapshot_download
-    snapshot_download("BAAI/bge-small-en-v1.5",
-                      revision="5c38ec7c405ec4b44b94cc5a9bb96e735b38267a")
-    model, tokenizer = load("BAAI/bge-small-en-v1.5")
+    snapshot_path = snapshot_download(
+        "BAAI/bge-small-en-v1.5",
+        revision="5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    )
+    model, tokenizer = load(snapshot_path)
     print("model loaded", flush=True)
 
     with open(CORPUS) as f:

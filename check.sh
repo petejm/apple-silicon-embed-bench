@@ -6,6 +6,13 @@
 # Exits 0 if everything is ready, 1 if blockers found.
 # bench.sh runs this automatically on startup.
 
+# Deliberately NOT `set -e`: check.sh is an error-accumulator. We want every
+# individual [CHECK] block to run regardless of any single failure so the
+# user sees the full picture of what's broken, not just the first thing.
+# Failures increment ERRORS/WARNINGS via err()/warn(); the final summary at
+# the bottom decides exit status. `set -u` (undef vars are errors) and
+# `pipefail` (catch pipe-segment failures) remain on. Tradeoff: typos in
+# check helpers are silent — keep this script short and review carefully.
 set -uo pipefail
 
 # Colors / glyphs work even on basic terminals
@@ -23,6 +30,17 @@ err()  { echo "${ERR}$1"; ERRORS=$((ERRORS+1)); }
 
 echo "==> apple-silicon-embed-bench — pre-flight check"
 echo
+
+# Resolve a usable Python interpreter up front. The memory check below uses
+# it for round() (so 24GB doesn't print as 23GB). The full Python-version
+# report still happens later in the [CHECK] Python section.
+PYBIN=""
+for cand in python3.12 python3.11 python3.10 python3.13; do
+  if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
+done
+if [ -z "$PYBIN" ] && command -v python3 >/dev/null 2>&1; then
+  PYBIN="python3"
+fi
 
 # 1. OS check
 echo "[CHECK] Operating system"
@@ -64,7 +82,12 @@ fi
 
 # 3. Memory
 echo "[CHECK] Memory"
-mem_gb=$(python3 -c "print(round($(sysctl -n hw.memsize) / 1024**3))" 2>/dev/null || echo "0")
+if [ -n "$PYBIN" ]; then
+  mem_gb=$("$PYBIN" -c "print(round($(sysctl -n hw.memsize) / 1024**3))" 2>/dev/null || echo "0")
+else
+  # No Python found; fall back to integer division (loses 1GB precision).
+  mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+fi
 if [ "$mem_gb" -lt 8 ]; then
   warn "${mem_gb}GB detected. The bench needs ~2GB free for venv + models + cache."
   note "      Should still run; MLX 100-batched long bucket may OOM on 8GB."

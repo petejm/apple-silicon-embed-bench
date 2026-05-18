@@ -51,7 +51,7 @@ Full 10-run variance tables (min/max/σ/CV per cell): [docs/results-m5-max.md](d
 
 1. **ANE-via-naive-FP16-coremltools-trace is the slowest GPU-class path** on both M4 Pro and M5 Max for this model. Not the fastest. (Different conversion paths, especially INT8 + `ml-ane-transformers`, may differ; not tested here.)
 2. **ANE perf is roughly flat across M-generations** (~80-90 sent/s on both M4 Pro and M5 Max). GPU is where Apple is shipping perf gains: 3.3× CoreML GPU and 8× batched MLX from M4 Pro → M5 Max (n=1 cross-gen per chip variant; thermals not controlled).
-3. **MLX dominates large-batch throughput** on M5 Max (4× faster than llama.cpp Metal at 100-in-one-call). The gap shrinks on M4 Pro and at more realistic batch sizes.
+3. **MLX dominates large-batch throughput** on M5 Max (2.6× faster than llama.cpp Metal at 100-in-one-call on the short bucket; 3.3× on medium, 1.6× on long — gap is largest at medium, not short). The gap shrinks on M4 Pro and at more realistic batch sizes.
 4. **The MLX-vs-llama gap is partly an Apple-API-exposure state**, not all closeable in llama.cpp code. llama.cpp build 9150 has `has tensor = false` in its Metal init log on macOS 26.5 — Apple's M5 tensor accelerators aren't being used. MLX uses them. A future llama.cpp release that re-enables tensor units may shrink the gap before any kernel work happens.
 
 ## Why this exists
@@ -147,7 +147,7 @@ Full methodology details: [docs/results-m5-max.md](docs/results-m5-max.md).
 
 These bit us during development; documented so they don't bite you:
 
-1. **MLX is lazy**. Calling MLX's tensor-materialize function on a model-output wrapper (BaseModelOutput) does NOT force compute. Materialize the inner tensor (e.g. `.text_embeds`). The bench does this; if you fork it, beware. First MLX bench reported 43K sent/s; real number was 7K once the tensor was forced.
+1. **MLX is lazy**. Calling MLX's tensor-materialize function on a model-output wrapper (BaseModelOutput) does NOT force compute. Materialize the inner tensor (e.g. `.text_embeds`). The bench does this; if you fork it, beware. First MLX bench reported 43K sent/s; the 10-run reproducible number is ~3,099 sent/s once the inner tensor is forced.
 2. **coremltools 9 + Python 3.13 + macOS 26 segfaults** in async destructor cleanup. Workaround: `os._exit(0)` after writing results. Applied in bench scripts. Apple should fix this; Python 3.12 is unaffected.
 3. **llama.cpp wall-time != inference time**. Process spawn / Metal pipeline init can take ~500ms. We use llama's `total_time` print instead.
 4. **CoreML mlpackage is traced at one fixed shape**. The bundled conversion uses batch=1, seq=512. Re-tracing requires modifying `convert_bge_coreml.py` and may fail on non-M5 silicon. Use `REBUILD_MLPACKAGE=1` only if you want to retrace.

@@ -8,10 +8,14 @@
 # is marked status="failed" rather than writing zeros that look like real
 # measurements. The aggregator surfaces these explicitly.
 set -euo pipefail
+# Defang locale-sensitive number formatting (e.g. decimal comma in some locales)
+export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODEL="$ROOT/models/bge-small-en-v1.5-f16.gguf"
 OUT="$ROOT/results/llama_metal.json"
 mkdir -p "$ROOT/results"
+# Clean up the partial JSON if anything below aborts.
+trap 'rm -f "$OUT.tmp"' EXIT
 
 # Pin a reasonable batch size; default varies by brew build.
 LLAMA_ARGS="--pooling mean --embd-output-format array --embd-normalize 2 -ngl 99 -b 4096 -ub 4096"
@@ -47,11 +51,15 @@ for bucket in short medium long; do
 
     # Parse llama_perf_context_print lines. Be defensive — if any field is
     # missing, treat the run as failed and surface it (not silent zeros).
-    prompt_eval_ms=$(grep "prompt eval time" "$log" | head -1 | sed -nE 's/.*= +([0-9]+\.[0-9]+) ms \/.*/\1/p')
-    prompt_tokens=$(grep "prompt eval time" "$log" | head -1 | sed -nE 's/.*ms \/ +([0-9]+) tokens.*/\1/p')
-    total_ms=$(grep "total time" "$log" | head -1 | sed -nE 's/.*= +([0-9]+\.[0-9]+) ms \/.*/\1/p')
+    # Pipelines fronted by grep must be `|| true` under `set -euo pipefail`,
+    # otherwise a no-match grep aborts the whole script before the explicit
+    # empty-check below ever runs (silent-fail = the bug this script was
+    # written to prevent). Regex tolerates both `1234.5 ms` and `1234 ms`.
+    prompt_eval_ms=$(grep "prompt eval time" "$log" | head -1 | sed -nE 's/.*= +([0-9]+(\.[0-9]+)?) ms \/.*/\1/p' || true)
+    prompt_tokens=$(grep "prompt eval time" "$log" | head -1 | sed -nE 's/.*ms \/ +([0-9]+) tokens.*/\1/p' || true)
+    total_ms=$(grep "total time" "$log" | head -1 | sed -nE 's/.*= +([0-9]+(\.[0-9]+)?) ms \/.*/\1/p' || true)
     n_batches=$(grep -c "batch_decode: n_tokens" "$log" || true)
-    max_n_seq=$(grep "batch_decode: n_tokens" "$log" | sed -nE 's/.*n_seq = ([0-9]+).*/\1/p' | sort -n | tail -1)
+    max_n_seq=$(grep "batch_decode: n_tokens" "$log" | sed -nE 's/.*n_seq = ([0-9]+).*/\1/p' | sort -n | tail -1 || true)
 
     if [ -z "$prompt_eval_ms" ] || [ -z "$prompt_tokens" ] || [ -z "$total_ms" ]; then
       echo "[llama-v2/$bucket/$r] FAILED — could not parse perf output. Last log lines:" >&2

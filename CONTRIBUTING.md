@@ -39,7 +39,7 @@ PR checklist:
 
 ## 3. Help me reach the llama.cpp maintainers
 
-The bench data shows llama.cpp's BERT-embed Metal path is 4-7× slower than
+The bench data shows llama.cpp's BERT-embed Metal path is 2.6-3.3× slower than
 MLX on the same hardware. That's a real upstream optimization opportunity.
 If you have relationships with the llama.cpp project, or experience
 optimizing Metal compute shaders, please reach out via an issue.

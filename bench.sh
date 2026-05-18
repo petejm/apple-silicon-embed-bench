@@ -27,9 +27,9 @@ echo "==> apple-silicon-embed-bench"
 echo "==> repo:  $ROOT"
 echo "==> macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
 echo "==> chip:  $(sysctl -n machdep.cpu.brand_string)"
-# Use bc for proper rounding so 24GB doesn't print as 23GB
-mem_gb=$(python3 -c "print(round($(sysctl -n hw.memsize) / 1024**3))")
-echo "==> mem:   ${mem_gb} GB"
+# (memory printed below, after Python interpreter selection — we use $PYBIN
+# for the round() so we don't take a hard dependency on `python3` being on
+# PATH before we know we have a usable Python at all.)
 echo
 
 # Track per-backend status so the result block can flag failures explicitly.
@@ -112,6 +112,10 @@ if [ "$pyminor" -eq 13 ]; then
 fi
 echo "==> python: $PYBIN ($($PYBIN -c 'import sys; print(sys.version.split()[0])'))"
 
+# Memory print uses $PYBIN (proper rounding so 24GB doesn't print as 23GB).
+mem_gb=$($PYBIN -c "print(round($(sysctl -n hw.memsize) / 1024**3))")
+echo "==> mem:   ${mem_gb} GB"
+
 # Recreate venv if requirements changed (idempotency)
 REQ_HASH=$(shasum -a 256 requirements.txt | awk '{print $1}')
 if [ -d venv ] && [ -f venv/.requirements.sha256 ] && \
@@ -166,7 +170,25 @@ if [ ! -d "$MLPKG_DIR" ]; then
       rm -f "$tarball"
       exit 1
     fi
-    tar xzf "$tarball" -C models
+    # Atomic extract: extract to a staging dir, then mv into place on success.
+    # An interrupted `tar xzf -C models` otherwise leaves a partial
+    # models/bge-small-en-v1.5.mlpackage/ dir that the next run's
+    # `[ ! -d ... ]` gate would silently skip re-downloading.
+    extract_dir=$(mktemp -d "${MLPKG_DIR}.partial.XXXXXX")
+    if ! tar xzf "$tarball" -C "$extract_dir"; then
+      echo "ERROR: mlpackage tarball extract failed; not leaving a partial directory in place."
+      rm -rf "$extract_dir"
+      rm -f "$tarball"
+      exit 1
+    fi
+    if [ ! -d "$extract_dir/bge-small-en-v1.5.mlpackage" ]; then
+      echo "ERROR: tarball did not contain expected bge-small-en-v1.5.mlpackage/ directory."
+      rm -rf "$extract_dir"
+      rm -f "$tarball"
+      exit 1
+    fi
+    mv "$extract_dir/bge-small-en-v1.5.mlpackage" "$MLPKG_DIR"
+    rmdir "$extract_dir" 2>/dev/null || rm -rf "$extract_dir"
     rm "$tarball"
   fi
 fi
@@ -204,10 +226,18 @@ run_backend() {
 
 # 5. Run device-placement probes (separate process to isolate crash class).
 # These produce results/devices_<unit>.json that bench_coreml.py picks up.
+# Track probe status — if probes silently fail, the methodology
+# selling-point ("verified device placement") is broken without anyone
+# noticing. Surface them in the result block.
 echo "==> device-placement probes"
 for u in ane gpu cpu; do
-  python3 bench/probe_devices.py --compute "$u" --out "results/devices_${u}.json" \
-    || echo "WARN: device probe for $u failed (informational; bench will still run)." >&2
+  if python3 bench/probe_devices.py --compute "$u" --out "results/devices_${u}.json"; then
+    set_status "probe $u" "ok"
+  else
+    rc=$?
+    set_status "probe $u" "failed(rc=$rc)"
+    echo "WARN: device probe for $u failed (rc=$rc). Bench will still run, but device-placement claims are unverified for this row." >&2
+  fi
 done
 
 # 6. Run benches
@@ -284,14 +314,43 @@ print("**Backend status:**")
 for name in ("CoreML ANE","CoreML GPU","CoreML CPU","llama.cpp Metal","MLX-embeddings"):
     print(f"- {name}: {statuses.get(name, 'unknown')}")
 print()
+print("**Device-placement probe status:**")
+for name in ("probe ane","probe gpu","probe cpu"):
+    print(f"- {name}: {statuses.get(name, 'unknown')}")
+print()
 print("| backend | short b=1 | short batched | medium b=1 | medium batched | long b=1 | long batched | cold (s) |")
 print("|---|---:|---:|---:|---:|---:|---:|---:|")
 
+def _fmt_stats(runs):
+    """Format mean / range / sigma for a list of per-run throughputs.
+    Drops first run (warmup), like the bench protocol elsewhere.
+    Returns e.g. `565.2 ±2.3 [560…568]`. Single line per cell.
+    """
+    if not runs or len(runs) < 2:
+        # With only the warmup or fewer, show whatever we have.
+        if runs:
+            return f"{runs[0]:.1f}"
+        return "—"
+    vals = runs[1:]  # drop run 1
+    mean = sum(vals) / len(vals)
+    lo, hi = min(vals), max(vals)
+    if len(vals) > 1:
+        var = sum((x - mean) ** 2 for x in vals) / (len(vals) - 1)
+        sigma = var ** 0.5
+        return f"{mean:.1f} ±{sigma:.1f} [{lo:.0f}…{hi:.0f}]"
+    return f"{mean:.1f} [{lo:.0f}…{hi:.0f}]"
+
 def b1(d, b):
-    try: return f"{d['buckets'][b]['batch1_sent_per_s']:.1f}"
+    try:
+        runs = d['buckets'][b].get('batch1_sent_per_s_runs')
+        if runs: return _fmt_stats(runs)
+        return f"{d['buckets'][b]['batch1_sent_per_s']:.1f}"
     except (KeyError, TypeError): return "—"
 def bN(d, b):
-    try: return f"{d['buckets'][b]['batchN_sent_per_s']:.1f}"
+    try:
+        runs = d['buckets'][b].get('batchN_sent_per_s_runs')
+        if runs: return _fmt_stats(runs)
+        return f"{d['buckets'][b]['batchN_sent_per_s']:.1f}"
     except (KeyError, TypeError): return "—"
 def cold(d):
     try: return f"{d['cold_start_s']:.2f}"
@@ -300,8 +359,9 @@ def llama_total(d, b):
     try:
         runs = [r for r in d['buckets'][b]['runs'] if r.get('status') == 'ok']
         if len(runs) < 2: return "—"  # need at least 2 successful runs to drop run 1
-        vals = [r['sent_per_s_total'] for r in runs[1:]]
-        return f"{sum(vals)/len(vals):.1f}"
+        vals = [r['sent_per_s_total'] for r in runs]
+        # _fmt_stats drops run 1 internally.
+        return _fmt_stats(vals)
     except (KeyError, TypeError): return "—"
 
 for label, key in [("CoreML ANE","coreml_ane"),("CoreML GPU","coreml_gpu"),("CoreML CPU","coreml_cpu")]:
