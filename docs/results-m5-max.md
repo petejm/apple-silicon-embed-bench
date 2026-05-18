@@ -45,6 +45,23 @@ llama.cpp's BERT-embed Metal path is leaving 4-7× perf on the table vs MLX on i
   - 100 sentences per bucket
 - **Protocol**: 5 runs of 100 sentences, drop run 1, mean of last 4
 
+## Reproducibility caveat (post-publication)
+
+A fresh-clone re-run of the hardened bench on the same M5 Max produced
+**MLX batched-short = 3,099 sent/s**, not the 6,950 reported in the table
+below (b=1 numbers reproduced exactly: 566 vs 561 originally). Same versions,
+same model, same corpus. The peak number is thermally sensitive — chassis
+state, sustained-load history, and background processes shift it. Treat the
+6,950 figure as an **upper bound observed**; **3,000-7,000 is the realistic
+range** on this hardware for that workload.
+
+The *direction* of every finding (ANE slowest GPU-class path, MLX dominates
+batched short/medium, llama.cpp's Metal BERT-embed leaves real perf on the
+table) is robust across re-runs. Specific magnitude factors at the extreme
+end (the 8× cross-gen MLX claim, the 78× ANE-vs-MLX claim) should be read
+as point estimates, not population means. Variance / sustained-throughput
+measurements are an outstanding methodology gap to close (see Open issues).
+
 ## Results
 
 ### Sentences/second (higher is better)

@@ -21,8 +21,21 @@ mem_gb=$(python3 -c "print(round($(sysctl -n hw.memsize) / 1024**3))")
 echo "==> mem:   ${mem_gb} GB"
 echo
 
-# Track per-backend status so the result block can flag failures explicitly
-declare -A BACKEND_STATUS=()
+# Track per-backend status so the result block can flag failures explicitly.
+# macOS ships bash 3.2 which lacks associative arrays; use a temp status file.
+STATUS_FILE="$(mktemp)"
+trap 'rm -f "$STATUS_FILE"' EXIT
+set_status() { printf "%s\t%s\n" "$1" "$2" >> "$STATUS_FILE"; }
+get_statuses_json() {
+  python3 -c '
+import json, sys
+d = {}
+for line in open(sys.argv[1]):
+    k, _, v = line.rstrip("\n").partition("\t")
+    if k: d[k] = v
+print(json.dumps(d))
+' "$STATUS_FILE"
+}
 
 # Computed at runtime so forks don't lie to their users
 REMOTE_URL=$(git config --get remote.origin.url 2>/dev/null || echo "")
@@ -58,15 +71,18 @@ if [ -z "$PYBIN" ]; then
     PYBIN="python3"
     pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
     if [ "$pyminor" -ge 13 ]; then
-      echo "WARN: Python 3.${pyminor} detected. coremltools 9 + Py3.13+ has a known"
-      echo "      destructor crash on macOS 26. The bench scripts work around it via"
-      echo "      os._exit(0), but for reliability please install Python 3.12:"
-      echo "        brew install python@3.12"
-      echo "      Continuing with $PYBIN..."
+      echo "ERROR: Python 3.${pyminor} detected, but torch 2.7.0 (required for"
+      echo "       coremltools 9.0 conversion) has no wheel for Python 3.13/3.14."
+      echo "       Install Python 3.12 and re-run:"
+      echo "         brew install python@3.12"
+      echo "       (Apple's CoreML destructor race on Py3.13+ is a separate issue;"
+      echo "       the bench scripts work around it via os._exit(0) once 3.12 is in"
+      echo "       use.)"
+      exit 1
     fi
   fi
 fi
-[ -z "$PYBIN" ] && { echo "ERROR: no usable python3 found." >&2; exit 1; }
+[ -z "$PYBIN" ] && { echo "ERROR: no usable python3 found. Install: brew install python@3.12" >&2; exit 1; }
 echo "==> python: $PYBIN ($($PYBIN -c 'import sys; print(sys.version.split()[0])'))"
 
 # Recreate venv if requirements changed (idempotency)
@@ -151,10 +167,10 @@ run_backend() {
   local name="$1"; shift
   echo "==> $name"
   if "$@"; then
-    BACKEND_STATUS[$name]="ok"
+    set_status "$name" "ok"
   else
     rc=$?
-    BACKEND_STATUS[$name]="failed(rc=$rc)"
+    set_status "$name" "failed(rc=$rc)"
     echo "WARN: $name backend failed (rc=$rc). Result block will show — for this row." >&2
   fi
 }
@@ -174,7 +190,7 @@ run_backend "CoreML CPU"  python3 bench/bench_coreml.py --compute cpu --out resu
 if command -v llama-embedding >/dev/null 2>&1; then
   run_backend "llama.cpp Metal" bench/bench_llama_v2.sh
 else
-  BACKEND_STATUS["llama.cpp Metal"]="skipped (llama.cpp not installed; brew install llama.cpp)"
+  set_status "llama.cpp Metal" "skipped (llama.cpp not installed; brew install llama.cpp)"
   echo "WARN: llama-embedding not found. Install with: brew install llama.cpp" >&2
 fi
 run_backend "MLX-embeddings" python3 bench/bench_mlx.py
@@ -185,12 +201,8 @@ echo "================================================================"
 echo "RESULT BLOCK (copy everything between BEGIN/END into your issue)"
 echo "================================================================"
 
-# Pass backend statuses to Python via a temp JSON
-status_json=$(python3 -c 'import json,sys; d=dict();
-for kv in sys.argv[1:]:
-    k,_,v = kv.partition("=")
-    d[k]=v
-print(json.dumps(d))' $(for k in "${!BACKEND_STATUS[@]}"; do echo "$k=${BACKEND_STATUS[$k]}"; done))
+# Pass backend statuses to Python via a JSON blob
+status_json=$(get_statuses_json)
 
 # Write result block to both stdout AND a file so submitters can attach it
 RESULT_MD="results/RESULT.md"
