@@ -1,0 +1,13 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+results/*.json
+models/
+corpus/corpus_buckets.json
+corpus/corpus_llama_*.txt
+.idea/
+.vscode/
+*.log
+.env
