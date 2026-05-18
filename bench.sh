@@ -160,7 +160,7 @@ if [ ! -d "$MLPKG_DIR" ]; then
     mkdir -p models
     tarball=models/bge-small-en-v1.5.mlpackage.tar.gz
     curl -L --fail -o "$tarball" \
-      "https://github.com/${UPSTREAM_REPO}/releases/download/v0.1.0/bge-small-en-v1.5.mlpackage.tar.gz" \
+      "https://github.com/${UPSTREAM_REPO}/releases/download/v1.0.0/bge-small-en-v1.5.mlpackage.tar.gz" \
       || { echo "ERROR: mlpackage download failed."; echo "  Try REBUILD_MLPACKAGE=1 ./bench.sh, or report the issue."; exit 1; }
     got=$(shasum -a 256 "$tarball" | awk '{print $1}')
     if [ "$got" != "$MLPACKAGE_TARBALL_SHA256" ]; then
