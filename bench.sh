@@ -18,10 +18,33 @@ echo "==> chip:  $(sysctl -n machdep.cpu.brand_string)"
 echo "==> mem:   $(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024)) GB"
 echo
 
-# 1. Python env
+# 1. Python env — prefer 3.12 or 3.11 (coremltools 9 has a known crash on 3.13)
+PYBIN=""
+for cand in python3.12 python3.11 python3; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    ver=$("$cand" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    case "$ver" in
+      3.11|3.12) PYBIN="$cand"; break ;;
+      3.13|3.14) [ -z "$PYBIN" ] && PYBIN="$cand" ;;  # fallback, will warn
+      3.10) PYBIN="$cand" ;;
+    esac
+  fi
+done
+if [ -z "$PYBIN" ]; then
+  echo "ERROR: no usable python3 found. Install python@3.12 (brew install python@3.12)."
+  exit 1
+fi
+echo "==> python: $PYBIN ($($PYBIN -c 'import sys; print(sys.version.split()[0])'))"
+case "$($PYBIN -c 'import sys; print(sys.version_info.minor)')" in
+  13|14)
+    echo "WARN: coremltools 9 + Python 3.13/3.14 has a known crash bug on macOS 26."
+    echo "      The bench scripts work around it via os._exit(0). For long-term use,"
+    echo "      install Python 3.12: brew install python@3.12"
+    ;;
+esac
 if [ ! -d venv ]; then
   echo "==> creating venv"
-  python3 -m venv venv
+  "$PYBIN" -m venv venv
 fi
 # shellcheck disable=SC1091
 source venv/bin/activate
