@@ -13,6 +13,9 @@ import coremltools as ct
 import numpy as np
 
 MODEL_ID = "BAAI/bge-small-en-v1.5"
+# Pin the HF revision so every machine converts byte-identical weights.
+# If HF replaces the model upstream, every bench number silently shifts. Pin.
+MODEL_REVISION = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
 SEQ_LEN = 512
 OUT = os.path.join(os.path.dirname(__file__), "..", "models", "bge-small-en-v1.5.mlpackage")
 
@@ -36,8 +39,8 @@ class BgeEmbedder(nn.Module):
 
 def main():
     print(f"[convert] loading {MODEL_ID}", flush=True)
-    tok = AutoTokenizer.from_pretrained(MODEL_ID)
-    base = AutoModel.from_pretrained(MODEL_ID, return_dict=False)
+    tok = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+    base = AutoModel.from_pretrained(MODEL_ID, revision=MODEL_REVISION, return_dict=False)
     base.train(False)
     wrapped = BgeEmbedder(base)
     wrapped.train(False)

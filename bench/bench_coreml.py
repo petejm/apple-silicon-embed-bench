@@ -19,6 +19,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL = os.path.join(ROOT, "models", "bge-small-en-v1.5.mlpackage")
 CORPUS = os.path.join(ROOT, "corpus", "corpus_buckets.json")
 SEQ_LEN = 512
+# Pin the HF revision so the tokenizer is byte-identical across machines.
+MODEL_REVISION = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
 
 COMPUTE_MAP = {
     "ane": ct.ComputeUnit.CPU_AND_NE,
@@ -44,7 +46,7 @@ def main():
     args = ap.parse_args()
 
     cu = COMPUTE_MAP[args.compute]
-    tok = AutoTokenizer.from_pretrained("BAAI/bge-small-en-v1.5")
+    tok = AutoTokenizer.from_pretrained("BAAI/bge-small-en-v1.5", revision=MODEL_REVISION)
     with open(CORPUS) as f:
         buckets = json.load(f)
 
@@ -61,8 +63,8 @@ def main():
     out_key = list(out.keys())[0]
     print(f"[{args.compute}] cold start {cold_s:.3f}s, out_key={out_key}, shape={out[out_key].shape}", flush=True)
 
-    # Device placement probe lives in bench/probe_devices.py (in-process crash mitigation)
-    probe_path = os.path.join(ROOT, "raw", f"devices_{args.compute}.json")
+    # Device placement probe runs separately (in bench.sh) and writes to results/.
+    probe_path = os.path.join(ROOT, "results", f"devices_{args.compute}.json")
     if os.path.exists(probe_path):
         with open(probe_path) as f:
             results["device_placement"] = json.load(f)

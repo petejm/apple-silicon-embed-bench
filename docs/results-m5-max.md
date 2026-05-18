@@ -2,9 +2,22 @@
 
 *Canonical results for the reference machine. Reproduce on your own Mac via `./bench.sh` at the repo root.*
 
+## Scope
+
+This bench measures **one specific deployment shape**: `BAAI/bge-small-en-v1.5` (33M, BERT-12, FP16) converted to CoreML via standard `coremltools.convert(torch.jit.trace(...))` at fixed batch=1 / seq=512. It does **not** test:
+- INT8 quantized models (ANE's documented sweet spot)
+- Apple's [`ml-ane-transformers`](https://github.com/apple/ml-ane-transformers) attention rewrite for ANE
+- Larger models (BGE-base, BGE-large, E5-mistral, etc.)
+- Realistic-batch shapes for MLX (b=16, b=32) — only b=1 and b=100
+- INT8 GGUF quantizations in llama.cpp
+- Sustained-throughput conditions (thermal-controlled long runs)
+- Roofline analysis (theoretical FP16 / memory-bandwidth ceiling)
+
+Conclusions apply to **this stack**, not to ANE / GPU / Metal in general. PR welcome to add the missing variants.
+
 ## TL;DR
 
-**ANE is the slowest GPU-class path on M5 Max for transformer text embeddings in FP16.** Not the fastest. The widely-held assumption that ANE is the fast efficient path for inference on Apple silicon doesn't generalize from vision/ASR (where it's true) to text-embedding transformers.
+**ANE-via-naive-FP16-coremltools-trace is the slowest GPU-class path on M5 Max for this model.** Not the fastest. The widely-held assumption that ANE is the fast efficient path for inference on Apple silicon doesn't generalize from vision/ASR (where it's true) to text-embedding transformers under this conversion pipeline.
 
 - CoreML ANE: ~89 sent/s
 - CoreML CPU: ~59 sent/s
@@ -79,15 +92,18 @@ MLX-embeddings hits ~7K sent/s on short batched workloads — 4.4× faster than 
 
 If you want to ship the fastest embedding path on Apple silicon today, you wrap MLX or you out-engineer MLX's Metal kernels. CoreML is a detour.
 
-### Finding 3: llama.cpp's Metal embedding path is leaving 4-7× on the table
+### Finding 3: llama.cpp's Metal embedding path is leaving 4-7× on the table — *partly closeable, partly Apple's API state*
 
-On the same hardware running the same model, MLX is 4-7× faster than llama.cpp's Metal embedding path. That gap is huge. It's almost certainly fixable — llama.cpp's BERT-embed path is less battle-tested than its decoder Metal kernels (which are top-tier). Possible wins:
+On the same hardware running the same model, MLX is 4-7× faster than llama.cpp's Metal embedding path at extreme batched workloads (100-in-one-call).
 
+**Important caveat — the gap is partly Apple's API exposure, not fully closeable in llama.cpp code.** The Metal init log on macOS 26.5 + brew build 9150 reports `has tensor = false`. Apple's M5 tensor accelerators are temporarily disabled in this build of llama.cpp; MLX uses them. A future llama.cpp release that re-enables tensor units (whisper.cpp b8920 era) may shrink this gap substantially before any kernel work happens.
+
+Even with tensor units accounted for, plausible code-side wins exist:
 - Better attention layout for BERT-style bidirectional models (no KV cache, no causal mask — the decoder-oriented path may be doing wasted work)
-- Larger ubatch sizes (current default 512 may be too small for embedding batched workloads where input tokens cap out at <50K total)
-- FP16 throughput tuning on M5 Max's tensor units (the new ones whisper.cpp + llama.cpp had to disable in early macOS 26 — `has tensor = false` in init log)
+- Larger ubatch sizes (current default 512 may be too small for embedding batched workloads where total input tokens cap at <50K)
+- Per-op profiling to find CPU-side bottlenecks (pooling, normalize, output gather)
 
-This is a much more interesting upstream contribution than a new CoreML backend. Doesn't require a new dependency, doesn't fork the build matrix, benefits 100% of Apple users not just those who run convert scripts.
+This is a more interesting upstream contribution than a new CoreML backend. Doesn't require a new dependency, doesn't fork the build matrix, benefits 100% of Apple users not just those who run convert scripts. The investigation plan: see the [llama.cpp BERT-embed Metal Perf PRP](https://github.com/petejm/apple-silicon-embed-bench/blob/main/docs/) (TODO — link to PRP once it lives somewhere public).
 
 ### Finding 4: coremltools + Python 3.13 + macOS 26 is a minefield
 

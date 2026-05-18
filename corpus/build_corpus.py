@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """Build a deterministic, public-domain corpus for the embedding bench.
 
-Sources:
-  - US Declaration of Independence (1776, US public domain)
-  - US Bill of Rights (1791, US public domain)
-  - Selected Federalist Papers excerpts (1788, US public domain)
-  - Project Gutenberg "Pride and Prejudice" first chapters (UK public domain
-    expired, US public domain)
+Source: Project Gutenberg "Pride and Prejudice" body excerpt (first ~80KB).
+Public domain in the US and most jurisdictions; Project Gutenberg header
+and footer stripped per their license. See corpus/NOTICE.md for the
+provenance / license details.
 
-All sources are uncontroversially public domain in the US and most
-jurisdictions. No network dependency: the text is bundled in `sources.txt`.
+No network dependency: the text is bundled in `sources.txt`.
 
 Output: corpus_buckets.json with three buckets:
   - short (~32 tokens avg)

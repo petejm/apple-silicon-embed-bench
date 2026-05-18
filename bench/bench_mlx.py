@@ -11,7 +11,12 @@ OUT = os.path.join(ROOT, "results", "mlx_embeddings.json")
 def main():
     from mlx_embeddings.utils import load, generate
     import mlx.core as mx
-    materialize = mx.eval  # MLX tensor materialization, not Python eval
+    materialize = mx.eval  # MLX tensor materialization; see README "MLX is lazy"
+    # load() takes no revision arg in mlx-embeddings 0.1.0; pin via HF cache by
+    # explicitly downloading the pinned revision first.
+    from huggingface_hub import snapshot_download
+    snapshot_download("BAAI/bge-small-en-v1.5",
+                      revision="5c38ec7c405ec4b44b94cc5a9bb96e735b38267a")
     model, tokenizer = load("BAAI/bge-small-en-v1.5")
     print("model loaded", flush=True)
 
