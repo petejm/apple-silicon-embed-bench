@@ -62,8 +62,9 @@ This repo is a reproducible bench so anyone can verify on their own Mac.
 Prereqs:
 - macOS 14+ (Sonoma or later; tested on macOS 26.5)
 - Apple silicon (M1+)
-- Python **3.12 or 3.11** (3.13 has a coremltools+CoreML destructor race; the
-  bench works around it via `os._exit(0)` but 3.12 is recommended)
+- Python **3.10 – 3.13** (3.12 is cleanest; 3.13 works via the bench's
+  `os._exit(0)` workaround for Apple's coremltools destructor race; 3.14 is
+  not supported because torch 2.7.0 has no wheel for it)
 - `brew install llama.cpp` (optional but recommended — for the llama.cpp row)
 
 One command:

@@ -64,28 +64,38 @@ if [ "$df_avail_gb" -lt 3 ]; then
   echo "WARN: only ${df_avail_gb}GB free on this volume; recommend 3GB+." >&2
 fi
 
-# 1. Python env — prefer 3.12 then 3.11 (coremltools 9 has a crash on 3.13)
+# 1. Python env — prefer 3.12 (clean), then 3.11, 3.10, 3.13. Hard-fail on 3.14+
+# (torch 2.7.0 has no Apple-silicon wheel) and on <=3.9 (too old for our deps).
+# 3.13 works but triggers Apple's coremltools destructor race in MLE5ExecutionStream;
+# the bench scripts work around it via os._exit(0). 3.12 is the cleanest target.
 PYBIN=""
-for cand in python3.12 python3.11 python3.10; do
+for cand in python3.12 python3.11 python3.10 python3.13; do
   if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
 done
-if [ -z "$PYBIN" ]; then
-  if command -v python3 >/dev/null 2>&1; then
-    PYBIN="python3"
-    pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
-    if [ "$pyminor" -ge 13 ]; then
-      echo "ERROR: Python 3.${pyminor} detected, but torch 2.7.0 (required for"
-      echo "       coremltools 9.0 conversion) has no wheel for Python 3.13/3.14."
-      echo "       Install Python 3.12 and re-run:"
-      echo "         brew install python@3.12"
-      echo "       (Apple's CoreML destructor race on Py3.13+ is a separate issue;"
-      echo "       the bench scripts work around it via os._exit(0) once 3.12 is in"
-      echo "       use.)"
-      exit 1
-    fi
-  fi
+if [ -z "$PYBIN" ] && command -v python3 >/dev/null 2>&1; then
+  PYBIN="python3"
 fi
 [ -z "$PYBIN" ] && { echo "ERROR: no usable python3 found. Install: brew install python@3.12" >&2; exit 1; }
+
+pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
+if [ "$pyminor" -ge 14 ]; then
+  echo "ERROR: Python 3.${pyminor} detected, but torch 2.7.0 (pinned for this bench)"
+  echo "       has no Apple-silicon wheel for Python 3.14+. Install Python 3.12 and"
+  echo "       re-run:"
+  echo "         brew install python@3.12"
+  exit 1
+fi
+if [ "$pyminor" -lt 10 ]; then
+  echo "ERROR: Python 3.${pyminor} is too old for coremltools 9 / torch 2.7."
+  echo "       Install Python 3.12 and re-run:"
+  echo "         brew install python@3.12"
+  exit 1
+fi
+if [ "$pyminor" -eq 13 ]; then
+  echo "INFO: Python 3.13 detected. The bench will work via the os._exit(0)"
+  echo "      workaround for Apple's CoreML destructor race. For a cleaner"
+  echo "      stack consider Python 3.12 (brew install python@3.12)."
+fi
 echo "==> python: $PYBIN ($($PYBIN -c 'import sys; print(sys.version.split()[0])'))"
 
 # Recreate venv if requirements changed (idempotency)
