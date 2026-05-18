@@ -49,6 +49,13 @@ fi
 # shellcheck disable=SC1091
 source venv/bin/activate
 pip install --quiet --upgrade pip
+# Install the deps we actually need. mlx-embeddings + mlx-vlm both want
+# transformers 5+ in their declared deps, but for text-only embedders like
+# bge-small the runtime path doesn't exercise transformers-5-specific code.
+# Install both --no-deps to avoid the transformers 4.x vs mlx-vlm-5+ conflict,
+# then pull the real runtime deps. mlx_vlm.utils.sanitize_weights is imported
+# at module load time by mlx_embeddings, so mlx-vlm has to be present.
+pip install --quiet --no-deps mlx-embeddings==0.1.0 mlx-vlm==0.4.4
 pip install --quiet -r requirements.txt
 
 # 2. Build corpus (deterministic; ~1 sec)

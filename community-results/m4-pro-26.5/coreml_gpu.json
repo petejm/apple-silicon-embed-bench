@@ -1,0 +1,41 @@
+{
+  "compute_unit_request": "gpu",
+  "model": "bge-small-en-v1.5",
+  "seq_len_pad": 512,
+  "buckets": {
+    "short": {
+      "batch1_sent_per_s_runs": [
+        168.6221567428371,
+        173.7240492366724,
+        172.95567097474142,
+        172.99759795960512,
+        173.0902626730462
+      ],
+      "batch1_sent_per_s": 173.1918952110163,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "medium": {
+      "batch1_sent_per_s_runs": [
+        172.65231853551123,
+        172.73198209387178,
+        172.6637211634337,
+        172.88917633298595,
+        172.86211696455797
+      ],
+      "batch1_sent_per_s": 172.78674913871237,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "long": {
+      "batch1_sent_per_s_runs": [
+        172.9359553360657,
+        173.03492883210905,
+        172.89659940646254,
+        172.99490416711285,
+        172.79351698345025
+      ],
+      "batch1_sent_per_s": 172.92998734728366,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    }
+  },
+  "cold_start_s": 1.629665666987421
+}

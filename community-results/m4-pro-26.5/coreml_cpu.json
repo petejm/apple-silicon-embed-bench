@@ -1,0 +1,41 @@
+{
+  "compute_unit_request": "cpu",
+  "model": "bge-small-en-v1.5",
+  "seq_len_pad": 512,
+  "buckets": {
+    "short": {
+      "batch1_sent_per_s_runs": [
+        70.66545183353922,
+        70.55301068186155,
+        70.63458401308424,
+        70.84082243042101,
+        71.16209687461408
+      ],
+      "batch1_sent_per_s": 70.79762849999523,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "medium": {
+      "batch1_sent_per_s_runs": [
+        71.1573159281105,
+        71.13327940195164,
+        70.85400657225381,
+        71.01954748259134,
+        70.7051754150994
+      ],
+      "batch1_sent_per_s": 70.92800221797405,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "long": {
+      "batch1_sent_per_s_runs": [
+        70.64481349430915,
+        70.89334354721456,
+        70.95490733231355,
+        70.60173893219694,
+        70.68762415598718
+      ],
+      "batch1_sent_per_s": 70.78440349192806,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    }
+  },
+  "cold_start_s": 0.2538161250122357
+}

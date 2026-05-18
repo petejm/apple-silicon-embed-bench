@@ -6,23 +6,26 @@ llama.cpp Metal — all on the same machine, same model, same corpus.
 
 ## TL;DR — ANE is the slow path
 
-On M5 Max with `BAAI/bge-small-en-v1.5` (BERT-12, 33M params, FP16):
+Bench results from `BAAI/bge-small-en-v1.5` (BERT-12, 33M params, FP16):
 
-| Backend | short (~32 tok) | medium (~124 tok) | long (~462 tok) |
-|---|---:|---:|---:|
-| CoreML ANE (seq=512 fixed) | 89 sent/s | 89 | 89 |
-| CoreML CPU (seq=512 fixed) | 58 | 59 | 59 |
-| CoreML GPU (seq=512 fixed) | 565 | 547 | 464 |
-| llama.cpp Metal (batched internally) | 1,567 | 597 | 197 |
-| **MLX-embeddings (batched)** | **6,950** | **1,747** | 282 |
+| Hardware | Backend | short (~32 tok) | medium (~124 tok) | long (~462 tok) |
+|---|---|---:|---:|---:|
+| M5 Max | CoreML ANE | 89 | 89 | 89 |
+| M5 Max | CoreML GPU | 565 | 547 | 464 |
+| M5 Max | llama.cpp Metal | **1,567** | 597 | 197 |
+| M5 Max | **MLX-embeddings (batched)** | **6,950** | **1,747** | 282 |
+| M4 Pro | CoreML ANE | 80 | 80 | 80 |
+| M4 Pro | CoreML GPU | 173 | 173 | 173 |
+| M4 Pro | llama.cpp Metal | **1,119** | 420 | 133 |
+| M4 Pro | MLX-embeddings (batched) | 860 | 500 | 116 |
 
-Sentences/second, higher is better. Full table at [docs/results-m5-max.md](docs/results-m5-max.md).
+Sentences/second, higher is better. Full tables at [docs/results-m5-max.md](docs/results-m5-max.md) + [community-results/](community-results/).
 
 **Headline findings**:
-1. ANE is the *slowest* GPU-class path on M5 Max for transformer embedding inference. Not the fastest.
-2. MLX dominates short/medium-length batched embedding. 4-7× faster than llama.cpp Metal on identical hardware.
-3. CoreML GPU only wins at long sequences (~400+ tokens), where fixed-shape kernel compilation amortizes.
-4. llama.cpp's BERT-embed Metal kernels appear to be leaving 4-7× perf on the table — a tractable upstream optimization opportunity.
+1. ANE is the *slowest* GPU-class path on both M4 Pro and M5 Max for transformer embedding inference. Not the fastest.
+2. **ANE perf is roughly flat across M-generations** (~80-90 sent/s on both M4 Pro and M5 Max). GPU is where Apple is shipping perf gains: 3.3× CoreML GPU and 8× batched MLX from M4 Pro → M5 Max.
+3. MLX dominates batched embedding on M5 Max (4× faster than llama.cpp Metal). On M4 Pro the gap closes because llama.cpp doesn't depend on M5's new tensor cores (which MLX uses).
+4. llama.cpp's BERT-embed Metal kernels are leaving 4-7× perf on the table on the latest hardware — a tractable upstream optimization opportunity.
 
 Detailed analysis: [docs/results-m5-max.md](docs/results-m5-max.md).
 
