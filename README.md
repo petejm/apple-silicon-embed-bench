@@ -81,6 +81,8 @@ cd apple-silicon-embed-bench
 ./bench.sh
 ```
 
+`bench.sh` runs `./check.sh` first — a pre-flight check that surfaces any missing/incompatible prereqs (macOS version, arm64, Python 3.10-3.13, brew, llama.cpp, disk space, network) up front, before any time is spent on venv setup or downloads. To run the check alone: `./check.sh`. To bypass: `SKIP_CHECK=1 ./bench.sh`.
+
 The script:
 1. Creates a Python venv and installs requirements (idempotent — rebuilds venv only if `requirements.txt` changed)
 2. Builds the deterministic public-domain corpus
@@ -112,6 +114,7 @@ cross-generation trend is the interesting open question.
 ├── README.md                  — this file
 ├── LICENSE                    — Apache 2.0 (covers the code)
 ├── bench.sh                   — one-command runner with SHA-verified downloads
+├── check.sh                   — pre-flight environment check (runs automatically)
 ├── requirements.txt           — Python deps (pinned)
 ├── bench/
 │   ├── convert_bge_coreml.py  — one-time mlpackage conversion (M5-only as of now)

@@ -1,0 +1,9 @@
+{
+  "compute_unit_request": "gpu",
+  "device_placement_available": true,
+  "op_count_by_device": {
+    "MLGPUComputeDevice": 315
+  },
+  "op_total": 745,
+  "op_const_skipped": 430
+}

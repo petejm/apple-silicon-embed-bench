@@ -1,0 +1,50 @@
+{
+  "compute_unit_request": "gpu",
+  "model": "bge-small-en-v1.5",
+  "seq_len_pad": 512,
+  "buckets": {
+    "short": {
+      "batch1_sent_per_s_runs": [
+        530.1217370967878,
+        570.989588137956,
+        565.0176391348483,
+        566.4740822682587,
+        572.4558581332982
+      ],
+      "batch1_sent_per_s": 568.7342919185903,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "medium": {
+      "batch1_sent_per_s_runs": [
+        566.3513673281394,
+        547.8262596227912,
+        570.1094457325623,
+        564.4053531640961,
+        515.668590074727
+      ],
+      "batch1_sent_per_s": 549.5024121485442,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "long": {
+      "batch1_sent_per_s_runs": [
+        530.3320077550422,
+        445.72847126840526,
+        443.52642752165906,
+        441.4997217744837,
+        439.28319297467687
+      ],
+      "batch1_sent_per_s": 442.50945338480625,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    }
+  },
+  "cold_start_s": 0.25522437499603257,
+  "device_placement": {
+    "compute_unit_request": "gpu",
+    "device_placement_available": true,
+    "op_count_by_device": {
+      "MLGPUComputeDevice": 315
+    },
+    "op_total": 745,
+    "op_const_skipped": 430
+  }
+}

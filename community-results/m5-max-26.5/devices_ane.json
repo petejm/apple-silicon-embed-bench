@@ -1,0 +1,10 @@
+{
+  "compute_unit_request": "ane",
+  "device_placement_available": true,
+  "op_count_by_device": {
+    "MLCPUComputeDevice": 24,
+    "MLNeuralEngineComputeDevice": 291
+  },
+  "op_total": 745,
+  "op_const_skipped": 430
+}

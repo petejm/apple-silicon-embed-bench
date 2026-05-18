@@ -1,0 +1,50 @@
+{
+  "compute_unit_request": "cpu",
+  "model": "bge-small-en-v1.5",
+  "seq_len_pad": 512,
+  "buckets": {
+    "short": {
+      "batch1_sent_per_s_runs": [
+        58.289746781229184,
+        58.38352087280899,
+        58.61353779311372,
+        58.72726133527817,
+        58.902344490579594
+      ],
+      "batch1_sent_per_s": 58.65666612294512,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "medium": {
+      "batch1_sent_per_s_runs": [
+        58.365545857298045,
+        58.71944918831704,
+        58.850923928100215,
+        58.865896963743566,
+        58.96811548476259
+      ],
+      "batch1_sent_per_s": 58.851096391230854,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "long": {
+      "batch1_sent_per_s_runs": [
+        57.86055952342222,
+        58.734924634304086,
+        58.81116035211842,
+        58.963150684973265,
+        58.47253939491987
+      ],
+      "batch1_sent_per_s": 58.74544376657891,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    }
+  },
+  "cold_start_s": 0.22362583401263691,
+  "device_placement": {
+    "compute_unit_request": "cpu",
+    "device_placement_available": true,
+    "op_count_by_device": {
+      "MLCPUComputeDevice": 315
+    },
+    "op_total": 745,
+    "op_const_skipped": 430
+  }
+}

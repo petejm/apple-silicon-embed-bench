@@ -12,6 +12,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Run pre-flight check unless explicitly skipped (SKIP_CHECK=1)
+if [ "${SKIP_CHECK:-0}" != "1" ] && [ -x "$ROOT/check.sh" ]; then
+  if ! "$ROOT/check.sh"; then
+    echo
+    echo "Pre-flight check found blockers. Fix them and re-run ./bench.sh"
+    echo "(or set SKIP_CHECK=1 to bypass at your own risk)."
+    exit 1
+  fi
+  echo
+fi
+
 echo "==> apple-silicon-embed-bench"
 echo "==> repo:  $ROOT"
 echo "==> macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"

@@ -1,0 +1,51 @@
+{
+  "compute_unit_request": "ane",
+  "model": "bge-small-en-v1.5",
+  "seq_len_pad": 512,
+  "buckets": {
+    "short": {
+      "batch1_sent_per_s_runs": [
+        89.05230644186295,
+        89.31809871682515,
+        89.35826801355987,
+        89.33405373888928,
+        89.18615959789302
+      ],
+      "batch1_sent_per_s": 89.29914501679184,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "medium": {
+      "batch1_sent_per_s_runs": [
+        89.24171095025028,
+        89.33329224053799,
+        89.25919219237495,
+        89.11521515822382,
+        89.10464759418323
+      ],
+      "batch1_sent_per_s": 89.20308679633,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    },
+    "long": {
+      "batch1_sent_per_s_runs": [
+        88.74263117219877,
+        88.8678436415809,
+        88.85606806471203,
+        88.6825836391171,
+        88.80082475629352
+      ],
+      "batch1_sent_per_s": 88.80183002542589,
+      "batch32_note": "model was traced at batch=1; per-sentence loop reflects real deployment cost on this model"
+    }
+  },
+  "cold_start_s": 1.4848650000058115,
+  "device_placement": {
+    "compute_unit_request": "ane",
+    "device_placement_available": true,
+    "op_count_by_device": {
+      "MLCPUComputeDevice": 24,
+      "MLNeuralEngineComputeDevice": 291
+    },
+    "op_total": 745,
+    "op_const_skipped": 430
+  }
+}
