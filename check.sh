@@ -115,7 +115,11 @@ else
   pyver=$($PYBIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
   pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
   if [ "$pyminor" -ge 14 ]; then
-    err "Python $pyver detected, but torch 2.7.0 has no Apple-silicon wheel for Python 3.14+."
+    err "Python $pyver detected. The bench stack is not viable on 3.14:"
+    note "      - torch 2.7.0 has no cp314 wheel (and torch 2.9+ has a typing.Union"
+    note "        AttributeError on 3.14 in torch.ao.quantization)"
+    note "      - coremltools 9.0 has no cp314 wheel (sdist fallback installs but"
+    note "        libcoremlpython.so is missing; all MLModel calls fail at runtime)"
     note "      Install: brew install python@3.12"
   elif [ "$pyminor" -lt 10 ]; then
     err "Python $pyver too old for coremltools 9 / torch 2.7."

@@ -90,9 +90,12 @@ fi
 
 pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
 if [ "$pyminor" -ge 14 ]; then
-  echo "ERROR: Python 3.${pyminor} detected, but torch 2.7.0 (pinned for this bench)"
-  echo "       has no Apple-silicon wheel for Python 3.14+. Install Python 3.12 and"
-  echo "       re-run:"
+  echo "ERROR: Python 3.${pyminor} detected. The bench stack is not viable on 3.14+:"
+  echo "       - torch 2.7.0 has no cp314 wheel; torch 2.9+ throws AttributeError"
+  echo "         on Py3.14 in torch.ao.quantization (typing.Union semantics changed)"
+  echo "       - coremltools 9.0 sdist installs but libcoremlpython.so is not built"
+  echo "         for 3.14; MLModel calls fail at runtime"
+  echo "       Install Python 3.12 and re-run:"
   echo "         brew install python@3.12"
   exit 1
 fi
