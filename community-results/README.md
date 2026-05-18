@@ -13,20 +13,29 @@ currently).
 
 ## Aggregated results
 
-Numbers below are short-bucket throughput (sentences/sec on bge-small at ~32
-token average inputs). Higher is better.
+Numbers below are 10-run means of short-bucket throughput (sentences/sec on
+bge-small at ~32 token average inputs). Higher is better. Single-run
+submissions are noted as such.
 
-| Chip | Memory | macOS | Submitter | CoreML ANE | CoreML GPU | llama.cpp Metal | MLX batched | Notes |
-|---|---|---|---|---:|---:|---:|---:|---|
-| Apple M5 Max | 64 GB | 26.5 | @petejm | 89 | 565 | 1,567 | 6,950 | reference |
-| Apple M4 Pro | 24 GB | 26.5 | @petejm | 80 | 173 | 1,119 | 860 | [details](m4-pro-26.5/) |
+| Chip | Memory | macOS | Submitter | CoreML ANE | CoreML GPU | llama.cpp Metal | MLX batched | n | Details |
+|---|---|---|---|---:|---:|---:|---:|---:|---|
+| Apple M5 Max | 64 GB | 26.5 | @petejm | 89 | 572 | 1,176 | 3,099 | 10 | [m5-max-26.5/](m5-max-26.5/) |
+| Apple M4 Pro | 24 GB | 26.5 | @petejm | 80 | 173 | 933 | 869 | 10 | [m4-pro-26.5/](m4-pro-26.5/) |
 
 **Cross-generation insights so far**:
-- ANE perf is roughly flat across M-generations (~80-90 sent/s on both M4 Pro and M5 Max).
-- M5 Max GPU is much faster than M4 Pro GPU: 3.3× on CoreML, 8× on MLX. Apple is investing in GPU, not ANE.
-- llama.cpp Metal scales only ~1.4× M4 Pro → M5 Max because it doesn't yet use M5's new tensor cores. MLX does.
+- ANE perf is roughly flat across M-generations (1.11× M4 Pro → M5 Max).
+- CoreML GPU scales 3.3× and batched MLX scales 3.6× M4 Pro → M5 Max. Apple is investing in GPU, not ANE.
+- llama.cpp Metal scales 1.26-1.76× M4 Pro → M5 Max because it doesn't yet use M5's new tensor cores (`has tensor = false` in init log on macOS 26.5 + brew build 9150). MLX does.
+- Mac mini is dramatically more thermally stable than MacBook (variance CVs typically <1% on mini vs up to 7.6% on MacBook for the same workload).
 
-We need more data points — especially M1, M2, M3 across all variants, and macOS 14/15 baselines.
+> **Correction note**: this table previously showed M5 Max MLX batched at
+> 6,950 sent/s, which a 10-run variance sweep could not reproduce. The 6,950
+> was a measurement artifact from an earlier version of `bench_mlx.py` that
+> didn't fully materialize MLX's lazy graph; that bug was fixed but the
+> headline numbers weren't re-measured at the time. The corrected number is
+> 3,099 ± 18 (CV 0.6%).
+
+We need more data points — especially M1, M1 Pro/Max/Ultra, M2 (all variants), M3 (all variants), M4 (base + Max), and macOS 14/15 baselines.
 
 ## Submitting raw JSON
 
