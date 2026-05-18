@@ -19,27 +19,33 @@ Two questions, two tables — because the four backends deploy in different shap
 
 ### Single-query latency (batch=1)
 
-How fast can each backend answer a one-sentence query? Relevant for interactive search, RAG query embedding.
+How fast can each backend answer a one-sentence query? Relevant for interactive search, RAG query embedding. Numbers are 10-run means.
 
 | Hardware | CoreML ANE | CoreML GPU | CoreML CPU | MLX |
 |---|---:|---:|---:|---:|
-| M5 Max | 89 | 565 | 58 | 561 |
-| M4 Pro | 80 | 173 | 71 | 396 |
+| M5 Max | 89 | 572 | 59 | 562 |
+| M4 Pro | 80 | 173 | 73 | 384 |
 
-Sentences/sec. CoreML rows pad every input to seq=512 (the mlpackage is traced at that fixed shape). MLX b=1 is a 100-sentence loop with one inference call per sentence.
+Sentences/sec on short bucket (~32 tok). CoreML rows pad every input to seq=512 (the mlpackage is traced at that fixed shape). MLX b=1 is a 100-sentence loop with one inference call per sentence.
 
 ### Throughput (natural batching)
 
-How fast can each backend chew through a corpus? Relevant for indexing, bulk reindex.
+How fast can each backend chew through a corpus? Relevant for indexing, bulk reindex. 10-run means.
 
 | Hardware | llama.cpp Metal (n_seq~66 batched) | MLX (100-in-one-call) |
 |---|---:|---:|
-| M5 Max | **1,567** | **6,950** |
-| M4 Pro | 1,119 | 860 |
+| M5 Max | **1,176** | **3,099** |
+| M4 Pro | 933 | 869 |
 
 Sentences/sec on short bucket (~32 tokens). llama.cpp does internal batching (~66 seq per forward pass). MLX numbers are an extreme batched case (100 in one call); a more realistic b=16 or b=32 would land lower.
 
-Detailed breakdowns by sequence length: [docs/results-m5-max.md](docs/results-m5-max.md) + [community-results/](community-results/).
+Full 10-run variance tables (min/max/σ/CV per cell): [docs/results-m5-max.md](docs/results-m5-max.md) + [community-results/](community-results/).
+
+> **Correction note**: an earlier version of this README headline showed MLX
+> batched-short on M5 Max as 6,950 sent/s. A 10-run variance sweep on the
+> same machine could not reproduce that number (mean 3,099, range
+> 3,070-3,125, σ=18, CV 0.6%). The 6,950 was a measurement artifact and has
+> been retracted.
 
 ### Headline findings (with appropriate caveats)
 

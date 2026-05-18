@@ -45,22 +45,28 @@ llama.cpp's BERT-embed Metal path is leaving 4-7× perf on the table vs MLX on i
   - 100 sentences per bucket
 - **Protocol**: 5 runs of 100 sentences, drop run 1, mean of last 4
 
-## Reproducibility caveat (post-publication)
+## 10-run variance sweep (2026-05-18)
 
-A fresh-clone re-run of the hardened bench on the same M5 Max produced
-**MLX batched-short = 3,099 sent/s**, not the 6,950 reported in the table
-below (b=1 numbers reproduced exactly: 566 vs 561 originally). Same versions,
-same model, same corpus. The peak number is thermally sensitive — chassis
-state, sustained-load history, and background processes shift it. Treat the
-6,950 figure as an **upper bound observed**; **3,000-7,000 is the realistic
-range** on this hardware for that workload.
+Repeated `./bench.sh` 10 times back-to-back on the same M5 Max MacBook to characterize variance properly. CV = coefficient of variation (σ / mean).
 
-The *direction* of every finding (ANE slowest GPU-class path, MLX dominates
-batched short/medium, llama.cpp's Metal BERT-embed leaves real perf on the
-table) is robust across re-runs. Specific magnitude factors at the extreme
-end (the 8× cross-gen MLX claim, the 78× ANE-vs-MLX claim) should be read
-as point estimates, not population means. Variance / sustained-throughput
-measurements are an outstanding methodology gap to close (see Open issues).
+| backend | short b=1 | medium b=1 | long b=1 | short batched | medium batched | long batched |
+|---|---|---|---|---|---|---|
+| CoreML ANE | 89 [89…90] CV 0.2% | 89 [86…89] CV 1.0% | 89 [87…89] CV 0.9% | — | — | — |
+| CoreML GPU | 572 [535…578] CV 2.3% | 562 [446…581] **CV 7.4%** | 564 [443…579] **CV 7.6%** | — | — | — |
+| CoreML CPU | 59 [59…59] CV 0.5% | 59 [59…60] CV 0.6% | 59 [59…60] CV 0.5% | — | — | — |
+| MLX (b=1) | 562 [544…567] CV 1.2% | 528 [512…533] CV 1.1% | 329 [313…332] CV 1.7% | — | — | — |
+| MLX (b=100) | — | — | — | **3,099 [3070…3125] CV 0.6%** | 1,647 [1634…1654] CV 0.3% | 325 [319…326] CV 0.6% |
+| llama.cpp Metal | — | — | — | 1,176 [1146…1187] CV 1.0% | 500 [467…524] CV 4.0% | 199 [196…203] CV 1.2% |
+
+**Headline numbers retracted**: an earlier version of this doc showed MLX batched-short at 6,950 sent/s. 10 runs produce 3,099 ± 18 (CV 0.6%, range 3,070-3,125). 6,950 was an outlier that didn't reproduce; the prior comparison framing has been corrected throughout this repo. The earlier MLX number was likely the result of an incomplete lazy-graph materialization in an earlier version of `bench_mlx.py` (the fix was committed but the headline numbers weren't re-measured at the time).
+
+**Observations from the variance sweep**:
+- **CoreML ANE and CPU are rock-stable** (CV < 1%). ANE in particular shows 0.2% CV on short batched — Apple's runtime appears to give very deterministic perf here.
+- **CoreML GPU is the noisiest** at medium/long buckets (CV 7.4-7.6%, range 443-581). Plausibly contention with OS-level GPU consumers (window compositor, browser, etc.) since this is a MacBook. The Mac mini variance sweep saw CV < 0.5% on the same path → it's a MacBook-thermals / multitasking artifact, not silicon variance.
+- **MLX batched is extremely stable** (CV 0.1-0.6%) once the lazy-graph materialization is correct.
+- **llama.cpp medium is unexpectedly noisy** (CV 4.0%, range 467-524) compared to short (1.0%) and long (1.2%). Worth investigating in the PRP's Phase 0.
+
+Per-run raw data preserved in the `runs/` subdirectory of the test workspace.
 
 ## Results
 
