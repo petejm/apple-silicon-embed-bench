@@ -35,10 +35,17 @@ echo
 # Track per-backend status so the result block can flag failures explicitly.
 # macOS ships bash 3.2 which lacks associative arrays; use a temp status file.
 STATUS_FILE="$(mktemp)"
-trap 'rm -f "$STATUS_FILE"' EXIT
+# Cleanup on any termination path — EXIT covers normal exit; INT/TERM cover
+# Ctrl-C and external kill. The tarball/mlpackage download path can leave
+# *.partial.* staging dirs; sweep them too.
+cleanup() {
+  rm -f "$STATUS_FILE"
+  rm -rf models/*.partial.* 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 set_status() { printf "%s\t%s\n" "$1" "$2" >> "$STATUS_FILE"; }
 get_statuses_json() {
-  python3 -c '
+  "$PYBIN" -c '
 import json, sys
 d = {}
 for line in open(sys.argv[1]):
@@ -79,13 +86,10 @@ fi
 # (torch 2.7.0 has no Apple-silicon wheel) and on <=3.9 (too old for our deps).
 # 3.13 works but triggers Apple's coremltools destructor race in MLE5ExecutionStream;
 # the bench scripts work around it via os._exit(0). 3.12 is the cleanest target.
-PYBIN=""
-for cand in python3.12 python3.11 python3.10 python3.13; do
-  if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
-done
-if [ -z "$PYBIN" ] && command -v python3 >/dev/null 2>&1; then
-  PYBIN="python3"
-fi
+# Selection logic is shared with check.sh via lib/python.sh.
+# shellcheck disable=SC1091
+. "$ROOT/lib/python.sh"
+pick_python || true
 [ -z "$PYBIN" ] && { echo "ERROR: no usable python3 found. Install: brew install python@3.12" >&2; exit 1; }
 
 pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
@@ -129,21 +133,30 @@ if [ ! -d venv ]; then
 fi
 # shellcheck disable=SC1091
 source venv/bin/activate
+# After venv activation, repoint PYBIN at the venv's python so every
+# subsequent "$PYBIN" invocation picks up the venv's installed deps. (Before
+# this point, PYBIN was the system-resolved interpreter we used to BUILD the
+# venv.) This makes the bench self-consistent — no bare `python3` calls that
+# could resolve to a different interpreter than the one with our deps.
+PYBIN="$(command -v python)"
 pip install --quiet --upgrade pip
 # Order matters: --no-deps for mlx-embeddings + mlx-vlm to break the
 # transformers-5+ transitive constraint, then explicit runtime deps from
 # requirements.txt, then anything mlx-embeddings imports at module load.
-pip install --quiet --no-deps mlx-embeddings==0.1.0 mlx-vlm==0.4.4 mlx-lm mlx-audio
+pip install --quiet --no-deps mlx-embeddings==0.1.0 mlx-vlm==0.4.4 mlx-lm==0.31.3 mlx-audio==0.4.3
 pip install --quiet -r requirements.txt
-# Runtime deps that mlx-vlm/mlx-audio import at module load. Pulled with default
-# deps so their own transitive needs (sympy, networkx, etc.) come along.
-pip install --quiet Pillow fastapi opencv-python miniaudio llguidance uvicorn datasets
+# Runtime deps that mlx-vlm/mlx-audio import at module load are now pinned
+# inside requirements.txt (Pillow, fastapi, opencv-python, miniaudio,
+# llguidance, uvicorn, datasets). Previously these were unpinned `pip
+# install` calls here, which produced silent skew across community
+# submissions — pinning them in requirements.txt makes the venv-rebuild
+# guard (REQ_HASH) catch upgrades.
 echo "$REQ_HASH" > venv/.requirements.sha256
 
 # 2. Build corpus (deterministic; ~1 sec)
 if [ ! -f corpus/corpus_buckets.json ]; then
   echo "==> building corpus"
-  python3 corpus/build_corpus.py
+  "$PYBIN" corpus/build_corpus.py
 fi
 
 # 3. Acquire CoreML mlpackage — prefer release asset over local conversion,
@@ -154,7 +167,7 @@ if [ ! -d "$MLPKG_DIR" ]; then
   if [ "${REBUILD_MLPACKAGE:-0}" = "1" ]; then
     echo "==> REBUILD_MLPACKAGE=1 — converting locally (may fail on non-M5 silicon)"
     mkdir -p models
-    python3 bench/convert_bge_coreml.py
+    "$PYBIN" bench/convert_bge_coreml.py
   else
     echo "==> downloading pre-built mlpackage from release"
     mkdir -p models
@@ -212,6 +225,22 @@ fi
 
 mkdir -p results
 
+# 4b. Cross-backend parity check (TR-3 D1/D3).
+# Runs before any per-backend bench so we abort early if the three backends
+# don't agree on the same function. results/parity.json gets surfaced in the
+# RESULT block.
+echo "==> cross-backend parity check (CoreML vs MLX vs llama)"
+if "$PYBIN" bench/verify_parity.py --allow-missing-backend; then
+  set_status "parity" "ok"
+else
+  parity_rc=$?
+  set_status "parity" "failed(rc=$parity_rc)"
+  echo "WARN: parity check failed (rc=$parity_rc). Per-backend numbers will still be" >&2
+  echo "      collected, but cross-backend ratio claims are not justified until parity" >&2
+  echo "      is restored. See results/parity.json for diagnostics." >&2
+fi
+echo
+
 run_backend() {
   local name="$1"; shift
   echo "==> $name"
@@ -231,7 +260,7 @@ run_backend() {
 # noticing. Surface them in the result block.
 echo "==> device-placement probes"
 for u in ane gpu cpu; do
-  if python3 bench/probe_devices.py --compute "$u" --out "results/devices_${u}.json"; then
+  if "$PYBIN" bench/probe_devices.py --compute "$u" --out "results/devices_${u}.json"; then
     set_status "probe $u" "ok"
   else
     rc=$?
@@ -241,16 +270,16 @@ for u in ane gpu cpu; do
 done
 
 # 6. Run benches
-run_backend "CoreML ANE"  python3 bench/bench_coreml.py --compute ane --out results/coreml_ane.json
-run_backend "CoreML GPU"  python3 bench/bench_coreml.py --compute gpu --out results/coreml_gpu.json
-run_backend "CoreML CPU"  python3 bench/bench_coreml.py --compute cpu --out results/coreml_cpu.json
+run_backend "CoreML ANE"  "$PYBIN" bench/bench_coreml.py --compute ane --out results/coreml_ane.json
+run_backend "CoreML GPU"  "$PYBIN" bench/bench_coreml.py --compute gpu --out results/coreml_gpu.json
+run_backend "CoreML CPU"  "$PYBIN" bench/bench_coreml.py --compute cpu --out results/coreml_cpu.json
 if command -v llama-embedding >/dev/null 2>&1; then
   run_backend "llama.cpp Metal" bench/bench_llama_v2.sh
 else
   set_status "llama.cpp Metal" "skipped (llama.cpp not installed; brew install llama.cpp)"
   echo "WARN: llama-embedding not found. Install with: brew install llama.cpp" >&2
 fi
-run_backend "MLX-embeddings" python3 bench/bench_mlx.py
+run_backend "MLX-embeddings" "$PYBIN" bench/bench_mlx.py
 
 # 7. Aggregate + print pasteable result block
 echo
@@ -265,7 +294,7 @@ status_json=$(get_statuses_json)
 RESULT_MD="results/RESULT.md"
 {
   echo "===BEGIN RESULT==="
-  python3 - "$status_json" <<'PY'
+  "$PYBIN" - "$status_json" <<'PY'
 import json, os, subprocess, sys
 from pathlib import Path
 
@@ -318,6 +347,28 @@ print("**Device-placement probe status:**")
 for name in ("probe ane","probe gpu","probe cpu"):
     print(f"- {name}: {statuses.get(name, 'unknown')}")
 print()
+# Backend parity (cross-backend cosine + token-count histogram)
+print("**Backend parity (cross-backend cosine + token-count histogram):**")
+print(f"- parity: {statuses.get('parity', 'unknown')}")
+parity_path = R / "parity.json"
+if parity_path.exists():
+    try:
+        p = json.loads(parity_path.read_text())
+        cos = p.get("checks", {}).get("cosine", {}).get("pairs", {})
+        for pair, info in cos.items():
+            if info.get("ok"):
+                print(f"  - cosine {pair}: min={info.get('min', 0):.4f}, mean={info.get('mean', 0):.4f} (>= {p.get('cosine_threshold')})")
+            else:
+                err = info.get("error") or f"min={info.get('min', 0):.4f} < {p.get('cosine_threshold')}"
+                print(f"  - cosine {pair}: FAIL — {err}")
+        tc = p.get("checks", {}).get("token_counts", {})
+        if tc:
+            ref = tc.get("ref_backend", "?")
+            for name, ok in tc.get("matches", {}).items():
+                print(f"  - token-count {ref} vs {name}: {'ok' if ok else 'FAIL'}")
+    except Exception as e:
+        print(f"  - (could not read parity.json: {type(e).__name__}: {e})")
+print()
 print("| backend | short b=1 | short batched | medium b=1 | medium batched | long b=1 | long batched | cold (s) |")
 print("|---|---:|---:|---:|---:|---:|---:|---:|")
 
@@ -357,7 +408,11 @@ def cold(d):
     except (KeyError, TypeError): return "—"
 def llama_total(d, b):
     try:
-        runs = [r for r in d['buckets'][b]['runs'] if r.get('status') == 'ok']
+        # Default-accept untagged runs: older bench_llama_v2.sh outputs (and
+        # the M4 Pro community results, pre-status-backfill) didn't emit a
+        # status field. Tagged runs default to 'ok'; only explicit failures
+        # ('failed', 'parse_failed') are filtered out.
+        runs = [r for r in d['buckets'][b]['runs'] if r.get('status', 'ok') == 'ok']
         if len(runs) < 2: return "—"  # need at least 2 successful runs to drop run 1
         vals = [r['sent_per_s_total'] for r in runs]
         # _fmt_stats drops run 1 internally.

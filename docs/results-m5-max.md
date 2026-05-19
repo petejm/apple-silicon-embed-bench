@@ -68,6 +68,26 @@ Repeated `./bench.sh` 10 times back-to-back on the same M5 Max MacBook to charac
 
 Per-run raw data preserved in the `runs/` subdirectory of the test workspace.
 
+### Propagated σ on the main ratio claims
+
+Headline ratios elsewhere in this doc are stated as bare numbers (e.g. "MLX is 2.6× faster than llama.cpp Metal at short batched"). The full picture is the ratio plus its propagated uncertainty, computed from the per-cell σ values via ratio × √((σ_n/μ_n)² + (σ_d/μ_d)²):
+
+| Claim | Ratio ± σ | Range |
+|---|---:|---|
+| CoreML ANE short b=1 (M5/M4) | 1.113 ± 0.003 | [1.110 … 1.115] |
+| CoreML GPU short b=1 (M5/M4) | 3.306 ± 0.076 | [3.230 … 3.383] |
+| MLX b=1 short (M5/M4) | 1.464 ± 0.020 | [1.444 … 1.483] |
+| MLX b=100 short (M5/M4) | 3.566 ± 0.021 | [3.545 … 3.587] |
+| llama.cpp short batched (M5/M4) | 1.260 ± 0.018 | [1.243 … 1.278] |
+| llama.cpp medium batched (M5/M4) | 1.425 ± 0.060 | [1.364 … 1.485] |
+| llama.cpp long batched (M5/M4) | 1.761 ± 0.024 | [1.737 … 1.785] |
+| MLX vs llama short batched (M5 Max) | 2.635 ± 0.031 | [2.604 … 2.666] |
+| MLX vs llama medium batched (M5 Max) | 3.294 ± 0.132 | [3.162 … 3.426] |
+| MLX vs llama long batched (M5 Max) | 1.633 ± 0.019 | [1.614 … 1.652] |
+| MLX vs CoreML-GPU short batched (M5 Max) | 5.418 ± 0.127 | [5.291 … 5.545] |
+
+No two ratio ranges in this table overlap with the adjacent integer boundary, i.e. every "Nx" claim above is statistically distinct from the next integer ratio at 1-σ. The medium-bucket MLX-vs-llama gap is the noisiest (CV 4.0% on the llama denominator pulls the propagated σ up to 0.132 — still well clear of either 3× or 3.5×). Caveat: these are 1-σ ranges over the 10-outer-run distribution, not formal confidence intervals; multiple outer-run sweeps on different machines would refine them.
+
 **Independent corroboration of MLX b=100**: 3,099 sent/s × 32 tok = 99K real tokens/sec. At ~6.5 GFLOPs/sentence forward, that's ~20 TFLOPS sustained. M5 Max GPU FP16 peak is approximately 30-50 TFLOPS — putting MLX at 40-67% of theoretical peak, which is plausible for a fused-attention implementation. The number passes a basic sanity check. We have not independently verified the measurement against a second framework on this exact workload; doing so is on the open-issues list.
 
 ## Results
@@ -107,17 +127,21 @@ This is the only legitimate niche for a CoreML embedding path — long-doc embed
 
 ## Findings
 
-### Finding 1: ANE is not the embedding accelerator we hoped
+### Finding 1: ANE-via-naive-FP16-coremltools-trace is the slowest GPU-class path on this chip for this model
 
-At every measured seq length on M5 Max, ANE runs bge-small at ~89 sentences/sec. CoreML GPU on the same model is ~6× faster. llama.cpp Metal at short batched is ~13× faster. MLX-embeddings batched is ~35× faster. **ANE is the slowest GPU-class device on this chip for transformer embedding inference.**
+At every measured seq length on M5 Max, ANE runs bge-small at ~89 sentences/sec. CoreML GPU on the same model is ~6× faster. llama.cpp Metal at short batched is ~13× faster. MLX-embeddings batched is ~35× faster. **ANE-via-naive-FP16-coremltools-trace is the slowest GPU-class device on this chip for this model's transformer embedding inference.**
 
-This is the opposite of the widely-held belief that ANE is the "fast efficient path" for inference on Apple silicon. ANE's strengths are vision models (CNNs, ViTs at int8) and small fixed-shape encoders like Whisper. For text-embedding transformers in FP16, it underperforms the GPU.
+Scope: this finding applies to the bge-small-en-v1.5 FP16 mlpackage produced by the standard `coremltools.convert(torch.jit.trace(...))` path traced at batch=1/seq=512. A different conversion path — especially INT8 + Apple's [`ml-ane-transformers`](https://github.com/apple/ml-ane-transformers) attention rewrite, which is the documented ANE optimum — may produce a different finding. We did not test it.
 
-### Finding 2: MLX is the actual fast path on Apple silicon
+This is the opposite of the widely-held belief that ANE is the "fast efficient path" for inference on Apple silicon. ANE's strengths are vision models (CNNs, ViTs at int8) and small fixed-shape encoders like Whisper. For text-embedding transformers in FP16 under the naive conversion path, it underperforms the GPU.
+
+### Finding 2: MLX is the actual fast path on Apple silicon — for this model, this stack, these batch shapes
 
 MLX-embeddings hits ~3.1K sent/s on short batched workloads — 2.6× faster than llama.cpp Metal and 5.4× faster than CoreML GPU on the same model. MLX is Apple's first-party ML framework, actively developed, uses Metal kernels with aggressive fusion. It bypasses the CoreML graph-compile layer (no .mlpackage required) and gets straight to optimal Metal shaders.
 
-If you want to ship the fastest embedding path on Apple silicon today, you wrap MLX or you out-engineer MLX's Metal kernels. CoreML is a detour.
+Scope: bge-small-en-v1.5 (33M, BERT-12) at FP16, on M5 Max, at b=1 and b=100 (no intermediate batch sizes tested). Larger models (BGE-base, BGE-large, E5-mistral), INT8 quantized variants, and realistic batch sizes (b=16, b=32) may show a different ranking. The gap shrinks on M4 Pro (see `community-results/m4-pro-26.5/`).
+
+If you want to ship the fastest embedding path on Apple silicon today — for this model, this stack, these batch shapes — you wrap MLX or you out-engineer MLX's Metal kernels. CoreML is a detour.
 
 ### Finding 3: llama.cpp's Metal embedding path is leaving 2.6-3.3× on the table — *partly closeable, partly Apple's API state*
 
@@ -163,7 +187,7 @@ The script prints a copy-pasteable result block at the end. [Submit your numbers
 
 ## Gotchas (durable lessons)
 
-1. **MLX is lazy**. Calling MLX's tensor-materialize function on a model-output wrapper (BaseModelOutput) does NOT force compute. You must materialize the inner tensor — e.g., the `text_embeds` field — explicitly. Silently returns fake-fast results otherwise. First MLX bench reported 43K sent/s; real number was 7K once the actual tensor was forced.
+1. **MLX is lazy**. Calling MLX's tensor-materialize function on a model-output wrapper (BaseModelOutput) does NOT force compute. You must materialize the inner tensor — e.g., the `text_embeds` field — explicitly. Silently returns fake-fast results otherwise. First MLX bench reported 43K sent/s; the 10-run reproducible number is ~3,099 sent/s once the inner tensor is forced.
 
 2. **coremltools 9 + Python 3.13 + macOS 26 segfaults** in async destructor cleanup. Workaround: `os._exit(0)` after writing results.
 

@@ -13,8 +13,8 @@ currently).
 
 ## Aggregated results
 
-Numbers below are 10-run means of short-bucket throughput (sentences/sec on
-bge-small at ~32 token average inputs). Higher is better. Single-run
+Headline numbers below are 10-run means from 10 independent `./bench.sh` invocations of short-bucket throughput (sentences/sec on
+bge-small at ~32 token average inputs). Higher is better. The bundled per-run JSON in `community-results/<chip>/` is run 1 of N. Single-run
 submissions are noted as such.
 
 | Chip | Memory | macOS | Submitter | CoreML ANE | CoreML GPU | llama.cpp Metal | MLX batched | n | Details |

@@ -14,10 +14,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODEL="$ROOT/models/bge-small-en-v1.5-f16.gguf"
 OUT="$ROOT/results/llama_metal.json"
 mkdir -p "$ROOT/results"
-# Clean up the partial JSON if anything below aborts.
-trap 'rm -f "$OUT.tmp"' EXIT
+# Clean up the partial JSON if anything below aborts. Extended to INT/TERM
+# so a Ctrl-C doesn't leave a stale OUT.tmp behind that the next run's atomic
+# mv would silently overwrite or trip on.
+llama_cleanup() { rm -f "$OUT.tmp"; }
+trap llama_cleanup EXIT INT TERM
 
 # Pin a reasonable batch size; default varies by brew build.
+# `-b 4096 -ub 4096` chosen to fit the medium bucket (~12K total tokens) and
+# the short bucket (~3.2K total tokens) within one ubatch, so llama internally
+# batches the whole corpus into a single forward pass for those buckets. The
+# long bucket (~46K total tokens) still spans ~11 ubatches at this size — we
+# didn't sweep ubatch for long. See the bench PRP for rationale (not tested:
+# how much short/medium throughput changes at ub=2048 or ub=8192).
 LLAMA_ARGS="--pooling mean --embd-output-format array --embd-normalize 2 -ngl 99 -b 4096 -ub 4096"
 
 if [ ! -f "$MODEL" ]; then
@@ -26,7 +35,29 @@ if [ ! -f "$MODEL" ]; then
   exit 1
 fi
 
-echo '{ "model": "bge-small-en-v1.5-f16.gguf", "backend": "llama.cpp Metal (internal timing)", "note": "llama.cpp BERT-embed batches sentences (n_seq=66 typical) into one forward pass; total_time / n_sentences = realistic throughput", "buckets": {' > "$OUT.tmp"
+# Probe the GGUF dtype tag once — surface it in the result block so the
+# three-backend dtype comparison (MLX float16, CoreML compute_precision,
+# llama gguf_dtype) is auditable from the artifacts alone.
+gguf_dtype="unknown"
+if command -v gguf-dump >/dev/null 2>&1; then
+  gguf_dtype=$(gguf-dump --no-tensors "$MODEL" 2>/dev/null | grep -i "general.file_type\|general\.quantization_version\|tensor_data_layout" | head -3 | tr '\n' ';' || echo "unknown")
+fi
+if [ "$gguf_dtype" = "unknown" ]; then
+  # Fallback: parse the early init log of a tiny dry run for 'f16' / 'q8' / 'f32' markers.
+  init_log=$(mktemp)
+  echo "test" > "${init_log}.txt"
+  # shellcheck disable=SC2086
+  llama-embedding -m "$MODEL" -f "${init_log}.txt" $LLAMA_ARGS > /dev/null 2> "$init_log" || true
+  gguf_dtype=$(grep -oE "ftype +=? +[A-Za-z0-9_-]+|file type:[^,]*|all F16|all F32|all Q[0-9]_[0-9KS]+" "$init_log" 2>/dev/null | head -3 | tr '\n' ';' || echo "unknown")
+  [ -z "$gguf_dtype" ] && gguf_dtype="unparsed"
+  rm -f "$init_log" "${init_log}.txt"
+fi
+echo "[llama-v2] gguf_dtype: $gguf_dtype" >&2
+
+# JSON-escape the dtype string (replace quotes/backslashes with safe chars).
+gguf_dtype_esc=$(printf '%s' "$gguf_dtype" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+echo "{ \"model\": \"bge-small-en-v1.5-f16.gguf\", \"backend\": \"llama.cpp Metal (internal timing)\", \"gguf_dtype\": \"$gguf_dtype_esc\", \"note\": \"llama.cpp BERT-embed batches sentences (n_seq=66 typical) into one forward pass; total_time / n_sentences = realistic throughput\", \"buckets\": {" > "$OUT.tmp"
 
 first=1
 overall_ok=1
@@ -59,10 +90,25 @@ for bucket in short medium long; do
     prompt_tokens=$(grep "prompt eval time" "$log" | head -1 | sed -nE 's/.*ms \/ +([0-9]+) tokens.*/\1/p' || true)
     total_ms=$(grep "total time" "$log" | head -1 | sed -nE 's/.*= +([0-9]+(\.[0-9]+)?) ms \/.*/\1/p' || true)
     n_batches=$(grep -c "batch_decode: n_tokens" "$log" || true)
-    max_n_seq=$(grep "batch_decode: n_tokens" "$log" | sed -nE 's/.*n_seq = ([0-9]+).*/\1/p' | sort -n | tail -1 || true)
+    # Wrap the whole pipeline so a no-match `grep` doesn't abort under
+    # `set -o pipefail` BEFORE `|| true` ever runs (TR-3 B2). Subshell
+    # `{...}` keeps stderr redirect and the final `|| echo ""` scoped to
+    # the entire chain, not just the last `tail -1`.
+    max_n_seq=$({ grep "batch_decode: n_tokens" "$log" | sed -nE 's/.*n_seq = ([0-9]+).*/\1/p' | sort -n | tail -1; } 2>/dev/null || echo "")
 
-    if [ -z "$prompt_eval_ms" ] || [ -z "$prompt_tokens" ] || [ -z "$total_ms" ]; then
-      echo "[llama-v2/$bucket/$r] FAILED — could not parse perf output. Last log lines:" >&2
+    # Reject empty strings AND numeric zero. llama.cpp's "= 0 ms" output for
+    # short prompts will legitimately match the grep regex above and would
+    # otherwise produce sent_per_s=0 / tokens_per_s=0 shipped as real data.
+    # `awk 'BEGIN{exit !(x+0 == 0)}'` returns 0 (success) when x parses as
+    # numeric zero, so the `||` chain treats numeric-zero like empty.
+    is_zero() { awk -v x="$1" 'BEGIN{exit !(x+0 == 0)}'; }
+    # total_ms is the load-bearing metric (used for sent_per_s_total which the
+    # community-results tables anchor on). prompt_eval_ms is sometimes legitimately
+    # 0 on short prompts due to ms-resolution rounding — that's a "no eval-only
+    # number available," not a parse failure. Only fail the run if total_ms is
+    # also missing/zero.
+    if [ -z "$total_ms" ] || is_zero "$total_ms"; then
+      echo "[llama-v2/$bucket/$r] FAILED — total_ms missing or zero. Last log lines:" >&2
       tail -10 "$log" >&2
       runs_json+="{\"run\":$r,\"status\":\"parse_failed\"},"
       bucket_ok=0
@@ -72,13 +118,29 @@ for bucket in short medium long; do
 
     # Sane defaults for optional fields
     [ -z "$max_n_seq" ] && max_n_seq=0
+    [ -z "$prompt_tokens" ] && prompt_tokens=0
 
-    sent_per_s_total=$(python3 -c "t=$total_ms; print(100.0/(t/1000.0) if t>0 else 0)")
-    sent_per_s_eval=$(python3 -c "t=$prompt_eval_ms; print(100.0/(t/1000.0) if t>0 else 0)")
-    tokens_per_s=$(python3 -c "t=$prompt_eval_ms; n=$prompt_tokens; print(n/(t/1000.0) if t>0 else 0)")
+    sent_per_s_total=$(python3 -c "t=$total_ms; print(100.0/(t/1000.0))")
+    # eval-only metrics: emit null (JSON) when prompt_eval_ms rounds to 0 or is
+    # missing — distinguishes "no data" from "real zero throughput."
+    if [ -z "$prompt_eval_ms" ] || is_zero "$prompt_eval_ms"; then
+      prompt_eval_ms_json="null"
+      sent_per_s_eval="null"
+      tokens_per_s="null"
+      eval_disp="—"
+    else
+      prompt_eval_ms_json="$prompt_eval_ms"
+      sent_per_s_eval=$(python3 -c "t=$prompt_eval_ms; print(100.0/(t/1000.0))")
+      if is_zero "$prompt_tokens"; then
+        tokens_per_s="null"
+      else
+        tokens_per_s=$(python3 -c "t=$prompt_eval_ms; n=$prompt_tokens; print(n/(t/1000.0))")
+      fi
+      eval_disp="${prompt_eval_ms}ms"
+    fi
 
-    runs_json+="{\"run\":$r,\"status\":\"ok\",\"prompt_eval_ms\":$prompt_eval_ms,\"prompt_tokens\":$prompt_tokens,\"total_ms\":$total_ms,\"n_batches\":$n_batches,\"max_n_seq\":$max_n_seq,\"sent_per_s_total\":$sent_per_s_total,\"sent_per_s_eval\":$sent_per_s_eval,\"tokens_per_s\":$tokens_per_s},"
-    echo "[llama-v2/$bucket/$r] eval=${prompt_eval_ms}ms (${prompt_tokens}tok) total=${total_ms}ms sent/s_total=$sent_per_s_total" >&2
+    runs_json+="{\"run\":$r,\"status\":\"ok\",\"prompt_eval_ms\":$prompt_eval_ms_json,\"prompt_tokens\":$prompt_tokens,\"total_ms\":$total_ms,\"n_batches\":$n_batches,\"max_n_seq\":$max_n_seq,\"sent_per_s_total\":$sent_per_s_total,\"sent_per_s_eval\":$sent_per_s_eval,\"tokens_per_s\":$tokens_per_s},"
+    echo "[llama-v2/$bucket/$r] eval=${eval_disp} (${prompt_tokens}tok) total=${total_ms}ms sent/s_total=$sent_per_s_total" >&2
     rm -f "$log"
   done
   runs_json="${runs_json%,}"

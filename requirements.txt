@@ -5,11 +5,33 @@
 # mlx-embeddings is installed via --no-deps in bench.sh because its declared
 # mlx-vlm dep transitively requires transformers 5+; we don't need mlx-vlm
 # for text embedders.
-numpy>=2.0,<3
+#
+# Every pin below is `==`. Ranges have caused silent skew across community
+# submissions (numpy 2.x ABI breaks, huggingface-hub URL endpoints changing).
+# Bump these deliberately; never let pip pick.
+#
+# Versions captured from the canonical M4 Pro venv (defcon-mini, Python 3.12)
+# that produced the published m4-pro-26.5 community-results JSON. M5 Max
+# MacBook venv is on the same pins (verify before each canonical-numbers run).
+numpy==2.4.5
 transformers==4.57.6
 tokenizers==0.22.2
 torch==2.7.0
 coremltools==9.0
 mlx==0.31.2
-huggingface-hub>=0.30
+mlx-metal==0.31.2
+huggingface-hub==0.36.2
 sentencepiece==0.2.1
+#
+# Runtime deps that mlx-embeddings / mlx-vlm import at module load. We
+# install these via `pip install -r` (with default deps) in bench.sh because
+# `--no-deps` on mlx-embeddings means their own transitive needs (sympy,
+# networkx, etc.) don't come along. Pinned here so they stop being "drift
+# surface" — versions previously varied per submitter machine.
+Pillow==12.2.0
+fastapi==0.136.1
+opencv-python==4.13.0.92
+miniaudio==1.71
+llguidance==1.7.5
+uvicorn==0.47.0
+datasets==4.8.5

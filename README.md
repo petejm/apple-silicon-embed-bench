@@ -19,7 +19,7 @@ Two questions, two tables — because the four backends deploy in different shap
 
 ### Single-query latency (batch=1)
 
-How fast can each backend answer a one-sentence query? Relevant for interactive search, RAG query embedding. Numbers are 10-run means.
+How fast can each backend answer a one-sentence query? Relevant for interactive search, RAG query embedding. Headline numbers are 10-run means from 10 independent `./bench.sh` invocations; the bundled per-run JSON in `community-results/<chip>/` is run 1 of N.
 
 | Hardware | CoreML ANE | CoreML GPU | CoreML CPU | MLX |
 |---|---:|---:|---:|---:|
@@ -30,7 +30,7 @@ Sentences/sec on short bucket (~32 tok). CoreML rows pad every input to seq=512 
 
 ### Throughput (natural batching)
 
-How fast can each backend chew through a corpus? Relevant for indexing, bulk reindex. 10-run means.
+How fast can each backend chew through a corpus? Relevant for indexing, bulk reindex. Headline numbers are 10-run means from 10 independent `./bench.sh` invocations; the bundled per-run JSON in `community-results/<chip>/` is run 1 of N.
 
 | Hardware | llama.cpp Metal (n_seq~66 batched) | MLX (100-in-one-call) |
 |---|---:|---:|
@@ -50,7 +50,7 @@ Full 10-run variance tables (min/max/σ/CV per cell): [docs/results-m5-max.md](d
 ### Headline findings (with appropriate caveats)
 
 1. **ANE-via-naive-FP16-coremltools-trace is the slowest GPU-class path** on both M4 Pro and M5 Max for this model. Not the fastest. (Different conversion paths, especially INT8 + `ml-ane-transformers`, may differ; not tested here.)
-2. **ANE perf is roughly flat across M-generations** (~80-90 sent/s on both M4 Pro and M5 Max). GPU is where Apple is shipping perf gains: 3.3× CoreML GPU and 8× batched MLX from M4 Pro → M5 Max (n=1 cross-gen per chip variant; thermals not controlled).
+2. **ANE perf is roughly flat across M-generations** (~80-90 sent/s on both M4 Pro and M5 Max). GPU is where Apple is shipping perf gains: 3.3× CoreML GPU and 3.6× batched MLX from M4 Pro → M5 Max. **Form-factor-honest framing**: this is M5 Max (MacBook, 64 GB) vs M4 Pro (Mac mini, 24 GB) — a single-pair comparison across two different thermal envelopes. Thermal headroom is a confound, not just silicon generation. We do NOT claim "across M-generations" as a silicon-only result.
 3. **MLX dominates large-batch throughput** on M5 Max (2.6× faster than llama.cpp Metal at 100-in-one-call on the short bucket; 3.3× on medium, 1.6× on long — gap is largest at medium, not short). The gap shrinks on M4 Pro and at more realistic batch sizes.
 4. **The MLX-vs-llama gap is partly an Apple-API-exposure state**, not all closeable in llama.cpp code. llama.cpp build 9150 has `has tensor = false` in its Metal init log on macOS 26.5 — Apple's M5 tensor accelerators aren't being used. MLX uses them. A future llama.cpp release that re-enables tensor units may shrink the gap before any kernel work happens.
 
@@ -95,6 +95,11 @@ The script:
 
 Total run time: ~5-15 minutes depending on hardware.
 
+> **Disk footprint note**: a single bench run populates `~/.cache/huggingface/`
+> with the tokenizer + model artifacts (~100 MB) on top of the ~130 MB the
+> bench itself downloads into `models/`. The HF cache is shared across HF
+> projects on your machine. `./bench.sh` will not clean it up.
+
 ## Submit your numbers
 
 Please share results from your hardware:
@@ -136,10 +141,21 @@ cross-generation trend is the interesting open question.
 
 - **Model**: `BAAI/bge-small-en-v1.5` (33M params, BERT-12 encoder, dim=384, FP16). Chosen because it converts cleanly to every backend, is a common production embedder, and is small enough that hardware differences dominate (not model size). HF revision pinned to commit `5c38ec7c`. Conclusions may not transfer to larger / INT8-quantized models.
 - **Corpus**: 300 sentences from a fixed public-domain text (Pride and Prejudice), bucketed by length: short (~32 tok), medium (~124 tok), long (~462 tok). 100 sentences per bucket. 19th-century prose; tokenization profile differs from code or modern conversational text.
-- **Protocol**: 5 warm runs of 100 sentences per bucket. Drop run 1, take mean of last 4. Cold start timed separately per backend (definitions differ — see results doc).
+- **Protocol** (two-level):
+  - **Inner loop**: a single `./bench.sh` invocation runs 5 warm runs × 100 sentences per bucket, drops run 1 (warmup), and takes the mean of runs 2–5. This produces one point estimate per bucket per invocation. A single inner run is **noisy** — not the canonical number.
+  - **Outer loop**: 10 independent `./bench.sh` invocations. The headline cells in the tables above are the **mean of those 10 outer-run means**, reported as `mean [min…max] σ CV%` (see [docs/results-m5-max.md](docs/results-m5-max.md) for the full variance table). Variance characterization requires the outer loop; a single invocation does not.
 - **Throughput unit**: sentences/sec, higher is better. For llama.cpp we use the internal `total_time` metric (not wall clock) because process spawn dominates wall for short benches. CoreML pads to seq=512 so effective tok/s differs from sent/s.
 - **Device verification**: `compute_units` is a hint, not a guarantee. `probe_devices.py` enumerates actual placement via `MLComputePlan` and writes `results/devices_<unit>.json`; the bench includes this in the result block.
-- **Variance**: 4-sample means (after dropping run 1) without explicit ±σ. For a robust headline, prefer the per-run lists in the raw JSON.
+
+### Reproducing the canonical numbers
+
+`./bench.sh` runs one inner-loop invocation — useful for a quick read but **not** the canonical headline. To reproduce the 10-outer-run means in this README, run:
+
+```bash
+N_SWEEPS=10 ./bench-sweep.sh
+```
+
+`bench-sweep.sh` wraps `bench.sh` in an outer loop, writing each run's `results/` to `results/run-NN/`, then prints an aggregate summary (`results/sweep_summary.{json,md}` — 10-run mean / range / σ / CV per cell). Total time scales linearly — expect ~50–150 minutes for `N_SWEEPS=10`. The default `./bench.sh` behavior (single invocation, 5 inner runs) is unchanged.
 
 Full methodology details: [docs/results-m5-max.md](docs/results-m5-max.md).
 
@@ -152,6 +168,19 @@ These bit us during development; documented so they don't bite you:
 3. **llama.cpp wall-time != inference time**. Process spawn / Metal pipeline init can take ~500ms. We use llama's `total_time` print instead.
 4. **CoreML mlpackage is traced at one fixed shape**. The bundled conversion uses batch=1, seq=512. Re-tracing requires modifying `convert_bge_coreml.py` and may fail on non-M5 silicon. Use `REBUILD_MLPACKAGE=1` only if you want to retrace.
 5. **`has tensor = false` in llama.cpp Metal init** on macOS 26.5 + brew build 9150. Apple's M5 tensor accelerators are temporarily disabled in this build. MLX uses them, llama.cpp doesn't — part of the headline MLX-vs-llama gap is this API-state, not closeable code.
+
+## Limitations
+
+Consolidated caveats — read these before generalizing any number in this README:
+
+- **Single conversion path tested**: HF → coremltools 9 → `torch.jit.trace` → FP16 mlpackage at batch=1/seq=512. Apple's `ml-ane-transformers` attention rewrite and INT8 quantization paths are documented ANE optima; neither is tested here. ANE numbers reflect this single conversion path, not ANE-in-general.
+- **Single model size**: bge-small-en-v1.5 only (33M params, BERT-12). Findings may not transfer to BGE-base, BGE-large, E5-mistral, or larger models where memory bandwidth and model size dominate differently.
+- **n=2 hardware variants**: M5 Max (MacBook, 64 GB) and M4 Pro (Mac mini, 24 GB). No M1, M2, M3, base M4, M-Ultra, or M-Max-non-MacBook data points. Cross-generation claims are based on one M5/M4 pair across different form factors.
+- **Cross-backend cosine parity check is bundled** (`bench/verify_parity.py`, invoked by `bench.sh`). If any backend fails the >= 0.999 cosine threshold against another, the result block surfaces it — but the four backends could still be doing subtly different things (different pooling, normalization, attention impl). The parity check is a sanity floor, not a proof of equivalence.
+- **MacBook thermals are not controlled to steady-state**. The M5 Max numbers are from a MacBook running browser / IDE / window manager — CV is 7.4–7.6% on CoreML GPU at medium/long buckets. The M4 Pro Mac mini variance is much tighter (CV < 0.5%) because of headless / cooled chassis. Form factor matters; we do not claim silicon-only deltas.
+- **No INT8 / `ml-ane-transformers` paths tested**. These are the documented ANE optima and would likely close (or reverse) the ANE-vs-GPU gap; we did not test them and our numbers don't speak to them.
+- **No dynamic-shape mlpackage tested**. CoreML is traced at fixed batch=1/seq=512. Variable-shape mlpackages punt to GPU on Apple silicon and have their own perf profile that this bench does not measure.
+- **MLX runs FP32, CoreML/llama.cpp run FP16**. `mlx-embeddings 0.1.0` loads `bge-small-en-v1.5` as float32 by default; CoreML's `.mlpackage` is FP16-traced and `bge-small-en-v1.5-f16.gguf` is FP16. The cross-backend cosine parity check still passes (embeddings agree to ≥ 0.999), so the comparison is meaningful — but MLX is doing roughly 2× the memory work per inference and is *still* the fastest batched path. This makes the "MLX is the fast Apple-silicon embedding path" finding *stronger*, not weaker, but the comparison is not strictly FP16-vs-FP16. A future revision should pin MLX to FP16 (via `mx.float16` cast on load) and remeasure. Until then, MLX numbers represent FP32 throughput; matching dtypes would likely produce a different (higher) MLX number.
 
 ## Licensing
 

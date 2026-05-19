@@ -24,12 +24,43 @@ def main():
         revision="5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
     )
     model, tokenizer = load(snapshot_path)
-    print("model loaded", flush=True)
+    # Surface the runtime dtype so the result block can prove FP16 (and not
+    # silently fall back to FP32). MLX exposes parameters() as a dict-tree;
+    # walk to the first leaf tensor and print its dtype.
+    def _first_param_dtype(params):
+        if hasattr(params, "dtype"):
+            return params.dtype
+        if isinstance(params, dict):
+            for v in params.values():
+                d = _first_param_dtype(v)
+                if d is not None:
+                    return d
+        if isinstance(params, (list, tuple)):
+            for v in params:
+                d = _first_param_dtype(v)
+                if d is not None:
+                    return d
+        return None
+    try:
+        first_dtype = _first_param_dtype(model.parameters())
+        first_dtype_str = str(first_dtype) if first_dtype is not None else "unknown"
+    except Exception as e:
+        first_dtype_str = f"introspect-failed: {type(e).__name__}: {e}"
+    print(f"model loaded; first-param dtype: {first_dtype_str}", flush=True)
+    # Soft assertion: warn (don't crash) if not float16. Comparing against
+    # the bench's documented contract.
+    if "float16" not in first_dtype_str:
+        print(f"WARN: MLX first-param dtype is {first_dtype_str}, not float16. "
+              "Headline numbers assume FP16; cross-backend parity check (verify_parity.py) "
+              "is the canonical apples-to-apples cosine.", flush=True)
+    results_dtype = first_dtype_str
 
     with open(CORPUS) as f:
         buckets = json.load(f)
     results = {"backend": "MLX-embeddings (auto compute, mostly Metal GPU)",
-               "model": "bge-small-en-v1.5", "buckets": {}}
+               "model": "bge-small-en-v1.5",
+               "first_param_dtype": results_dtype,
+               "buckets": {}}
 
     t0 = time.perf_counter()
     out = generate(model, tokenizer, [buckets["short"][0]])

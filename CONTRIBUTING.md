@@ -17,6 +17,22 @@ How:
 No need to interpret the numbers; we'll aggregate them. The more submissions
 the cleaner the cross-generation trend.
 
+### Submitting results with partial failures
+
+Partial results (one backend failed, e.g. `llama-embedding` not installed,
+ANE probe error, etc.) are still welcome — they're useful data. We'll
+annotate failed cells with `—` in the aggregate table. Please:
+
+- **Don't** trim the result block; the per-backend status lines tell us
+  exactly which row is missing and why.
+- **Do** include the FAIL message from the result block (the `WARN:` line
+  printed during the run is also helpful).
+- **Optional**: if you want to include raw per-run JSON, open a PR adding
+  your `results/` directory under
+  [`community-results/<chip>-<macos>-<short-id>/`](community-results/) —
+  mirror the layout of [`community-results/m5-max-26.5/`](community-results/m5-max-26.5/)
+  or [`community-results/m4-pro-26.5/`](community-results/m4-pro-26.5/).
+
 ## 2. Fix bench bugs / add backends
 
 PRs welcome for:
