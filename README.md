@@ -95,6 +95,11 @@ The script:
 
 Total run time: ~5-15 minutes depending on hardware.
 
+> **Disk footprint note**: a single bench run populates `~/.cache/huggingface/`
+> with the tokenizer + model artifacts (~100 MB) on top of the ~130 MB the
+> bench itself downloads into `models/`. The HF cache is shared across HF
+> projects on your machine. `./bench.sh` will not clean it up.
+
 ## Submit your numbers
 
 Please share results from your hardware:

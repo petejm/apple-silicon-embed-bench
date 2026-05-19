@@ -34,13 +34,11 @@ echo
 # Resolve a usable Python interpreter up front. The memory check below uses
 # it for round() (so 24GB doesn't print as 23GB). The full Python-version
 # report still happens later in the [CHECK] Python section.
-PYBIN=""
-for cand in python3.12 python3.11 python3.10 python3.13; do
-  if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
-done
-if [ -z "$PYBIN" ] && command -v python3 >/dev/null 2>&1; then
-  PYBIN="python3"
-fi
+# Selection logic is shared with bench.sh via lib/python.sh.
+CHECK_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+. "$CHECK_ROOT/lib/python.sh"
+pick_python || true
 
 # 1. OS check
 echo "[CHECK] Operating system"
@@ -123,13 +121,8 @@ echo
 
 # 6. Python version & availability
 echo "[CHECK] Python (need 3.10–3.13; 3.14+ has no torch 2.7 wheel; <=3.9 too old for coremltools 9)"
-PYBIN=""
-for cand in python3.12 python3.11 python3.10 python3.13; do
-  if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
-done
-if [ -z "$PYBIN" ] && command -v python3 >/dev/null 2>&1; then
-  PYBIN="python3"
-fi
+# Re-run picker (idempotent; same result as the early one above).
+pick_python || true
 
 if [ -z "$PYBIN" ]; then
   err "No python3 found."

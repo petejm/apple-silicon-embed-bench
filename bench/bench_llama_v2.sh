@@ -14,10 +14,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODEL="$ROOT/models/bge-small-en-v1.5-f16.gguf"
 OUT="$ROOT/results/llama_metal.json"
 mkdir -p "$ROOT/results"
-# Clean up the partial JSON if anything below aborts.
-trap 'rm -f "$OUT.tmp"' EXIT
+# Clean up the partial JSON if anything below aborts. Extended to INT/TERM
+# so a Ctrl-C doesn't leave a stale OUT.tmp behind that the next run's atomic
+# mv would silently overwrite or trip on.
+llama_cleanup() { rm -f "$OUT.tmp"; }
+trap llama_cleanup EXIT INT TERM
 
 # Pin a reasonable batch size; default varies by brew build.
+# `-b 4096 -ub 4096` chosen to fit the medium bucket (~12K total tokens) and
+# the short bucket (~3.2K total tokens) within one ubatch, so llama internally
+# batches the whole corpus into a single forward pass for those buckets. The
+# long bucket (~46K total tokens) still spans ~11 ubatches at this size — we
+# didn't sweep ubatch for long. See the bench PRP for rationale (not tested:
+# how much short/medium throughput changes at ub=2048 or ub=8192).
 LLAMA_ARGS="--pooling mean --embd-output-format array --embd-normalize 2 -ngl 99 -b 4096 -ub 4096"
 
 if [ ! -f "$MODEL" ]; then

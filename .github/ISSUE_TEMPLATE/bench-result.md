@@ -6,16 +6,11 @@ labels: bench-result
 assignees: ''
 ---
 
-## Hardware
-<!-- bench.sh prints these at the top — fill them in here for searchability -->
-
-- Chip:
-- Memory:
-- macOS version:
-
 ## Result block
 
-<!-- Paste everything between ===BEGIN RESULT=== and ===END RESULT=== from bench.sh -->
+<!-- Paste everything between ===BEGIN RESULT=== and ===END RESULT=== from bench.sh.
+The bench captures chip / memory / macOS / python / llama.cpp version automatically,
+so this block is everything we need. No separate Hardware section to fill out. -->
 
 ```
 ===BEGIN RESULT===

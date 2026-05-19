@@ -4,6 +4,9 @@ __pycache__/
 *.pyc
 .DS_Store
 results/*.json
+results/RESULT.md
+results/run-*/
+results/sweep_summary.*
 models/
 corpus/corpus_buckets.json
 corpus/corpus_llama_*.txt

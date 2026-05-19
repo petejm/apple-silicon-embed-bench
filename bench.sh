@@ -35,7 +35,14 @@ echo
 # Track per-backend status so the result block can flag failures explicitly.
 # macOS ships bash 3.2 which lacks associative arrays; use a temp status file.
 STATUS_FILE="$(mktemp)"
-trap 'rm -f "$STATUS_FILE"' EXIT
+# Cleanup on any termination path — EXIT covers normal exit; INT/TERM cover
+# Ctrl-C and external kill. The tarball/mlpackage download path can leave
+# *.partial.* staging dirs; sweep them too.
+cleanup() {
+  rm -f "$STATUS_FILE"
+  rm -rf models/*.partial.* 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 set_status() { printf "%s\t%s\n" "$1" "$2" >> "$STATUS_FILE"; }
 get_statuses_json() {
   "$PYBIN" -c '
@@ -79,13 +86,10 @@ fi
 # (torch 2.7.0 has no Apple-silicon wheel) and on <=3.9 (too old for our deps).
 # 3.13 works but triggers Apple's coremltools destructor race in MLE5ExecutionStream;
 # the bench scripts work around it via os._exit(0). 3.12 is the cleanest target.
-PYBIN=""
-for cand in python3.12 python3.11 python3.10 python3.13; do
-  if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
-done
-if [ -z "$PYBIN" ] && command -v python3 >/dev/null 2>&1; then
-  PYBIN="python3"
-fi
+# Selection logic is shared with check.sh via lib/python.sh.
+# shellcheck disable=SC1091
+. "$ROOT/lib/python.sh"
+pick_python || true
 [ -z "$PYBIN" ] && { echo "ERROR: no usable python3 found. Install: brew install python@3.12" >&2; exit 1; }
 
 pyminor=$($PYBIN -c 'import sys; print(sys.version_info.minor)')
