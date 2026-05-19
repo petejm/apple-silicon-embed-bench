@@ -38,7 +38,7 @@ STATUS_FILE="$(mktemp)"
 trap 'rm -f "$STATUS_FILE"' EXIT
 set_status() { printf "%s\t%s\n" "$1" "$2" >> "$STATUS_FILE"; }
 get_statuses_json() {
-  python3 -c '
+  "$PYBIN" -c '
 import json, sys
 d = {}
 for line in open(sys.argv[1]):
@@ -129,6 +129,12 @@ if [ ! -d venv ]; then
 fi
 # shellcheck disable=SC1091
 source venv/bin/activate
+# After venv activation, repoint PYBIN at the venv's python so every
+# subsequent "$PYBIN" invocation picks up the venv's installed deps. (Before
+# this point, PYBIN was the system-resolved interpreter we used to BUILD the
+# venv.) This makes the bench self-consistent — no bare `python3` calls that
+# could resolve to a different interpreter than the one with our deps.
+PYBIN="$(command -v python)"
 pip install --quiet --upgrade pip
 # Order matters: --no-deps for mlx-embeddings + mlx-vlm to break the
 # transformers-5+ transitive constraint, then explicit runtime deps from
@@ -143,7 +149,7 @@ echo "$REQ_HASH" > venv/.requirements.sha256
 # 2. Build corpus (deterministic; ~1 sec)
 if [ ! -f corpus/corpus_buckets.json ]; then
   echo "==> building corpus"
-  python3 corpus/build_corpus.py
+  "$PYBIN" corpus/build_corpus.py
 fi
 
 # 3. Acquire CoreML mlpackage — prefer release asset over local conversion,
@@ -154,7 +160,7 @@ if [ ! -d "$MLPKG_DIR" ]; then
   if [ "${REBUILD_MLPACKAGE:-0}" = "1" ]; then
     echo "==> REBUILD_MLPACKAGE=1 — converting locally (may fail on non-M5 silicon)"
     mkdir -p models
-    python3 bench/convert_bge_coreml.py
+    "$PYBIN" bench/convert_bge_coreml.py
   else
     echo "==> downloading pre-built mlpackage from release"
     mkdir -p models
@@ -231,7 +237,7 @@ run_backend() {
 # noticing. Surface them in the result block.
 echo "==> device-placement probes"
 for u in ane gpu cpu; do
-  if python3 bench/probe_devices.py --compute "$u" --out "results/devices_${u}.json"; then
+  if "$PYBIN" bench/probe_devices.py --compute "$u" --out "results/devices_${u}.json"; then
     set_status "probe $u" "ok"
   else
     rc=$?
@@ -241,16 +247,16 @@ for u in ane gpu cpu; do
 done
 
 # 6. Run benches
-run_backend "CoreML ANE"  python3 bench/bench_coreml.py --compute ane --out results/coreml_ane.json
-run_backend "CoreML GPU"  python3 bench/bench_coreml.py --compute gpu --out results/coreml_gpu.json
-run_backend "CoreML CPU"  python3 bench/bench_coreml.py --compute cpu --out results/coreml_cpu.json
+run_backend "CoreML ANE"  "$PYBIN" bench/bench_coreml.py --compute ane --out results/coreml_ane.json
+run_backend "CoreML GPU"  "$PYBIN" bench/bench_coreml.py --compute gpu --out results/coreml_gpu.json
+run_backend "CoreML CPU"  "$PYBIN" bench/bench_coreml.py --compute cpu --out results/coreml_cpu.json
 if command -v llama-embedding >/dev/null 2>&1; then
   run_backend "llama.cpp Metal" bench/bench_llama_v2.sh
 else
   set_status "llama.cpp Metal" "skipped (llama.cpp not installed; brew install llama.cpp)"
   echo "WARN: llama-embedding not found. Install with: brew install llama.cpp" >&2
 fi
-run_backend "MLX-embeddings" python3 bench/bench_mlx.py
+run_backend "MLX-embeddings" "$PYBIN" bench/bench_mlx.py
 
 # 7. Aggregate + print pasteable result block
 echo
@@ -265,7 +271,7 @@ status_json=$(get_statuses_json)
 RESULT_MD="results/RESULT.md"
 {
   echo "===BEGIN RESULT==="
-  python3 - "$status_json" <<'PY'
+  "$PYBIN" - "$status_json" <<'PY'
 import json, os, subprocess, sys
 from pathlib import Path
 

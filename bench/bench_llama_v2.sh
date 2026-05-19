@@ -59,10 +59,22 @@ for bucket in short medium long; do
     prompt_tokens=$(grep "prompt eval time" "$log" | head -1 | sed -nE 's/.*ms \/ +([0-9]+) tokens.*/\1/p' || true)
     total_ms=$(grep "total time" "$log" | head -1 | sed -nE 's/.*= +([0-9]+(\.[0-9]+)?) ms \/.*/\1/p' || true)
     n_batches=$(grep -c "batch_decode: n_tokens" "$log" || true)
-    max_n_seq=$(grep "batch_decode: n_tokens" "$log" | sed -nE 's/.*n_seq = ([0-9]+).*/\1/p' | sort -n | tail -1 || true)
+    # Wrap the whole pipeline so a no-match `grep` doesn't abort under
+    # `set -o pipefail` BEFORE `|| true` ever runs (TR-3 B2). Subshell
+    # `{...}` keeps stderr redirect and the final `|| echo ""` scoped to
+    # the entire chain, not just the last `tail -1`.
+    max_n_seq=$({ grep "batch_decode: n_tokens" "$log" | sed -nE 's/.*n_seq = ([0-9]+).*/\1/p' | sort -n | tail -1; } 2>/dev/null || echo "")
 
-    if [ -z "$prompt_eval_ms" ] || [ -z "$prompt_tokens" ] || [ -z "$total_ms" ]; then
-      echo "[llama-v2/$bucket/$r] FAILED — could not parse perf output. Last log lines:" >&2
+    # Reject empty strings AND numeric zero. llama.cpp's "= 0 ms" output for
+    # short prompts will legitimately match the grep regex above and would
+    # otherwise produce sent_per_s=0 / tokens_per_s=0 shipped as real data.
+    # `awk 'BEGIN{exit !(x+0 == 0)}'` returns 0 (success) when x parses as
+    # numeric zero, so the `||` chain treats numeric-zero like empty.
+    is_zero() { awk -v x="$1" 'BEGIN{exit !(x+0 == 0)}'; }
+    if [ -z "$prompt_eval_ms" ] || is_zero "$prompt_eval_ms" \
+       || [ -z "$prompt_tokens" ] || is_zero "$prompt_tokens" \
+       || [ -z "$total_ms" ] || is_zero "$total_ms"; then
+      echo "[llama-v2/$bucket/$r] FAILED — could not parse perf output (empty or numeric zero). Last log lines:" >&2
       tail -10 "$log" >&2
       runs_json+="{\"run\":$r,\"status\":\"parse_failed\"},"
       bucket_ok=0

@@ -78,8 +78,12 @@ def main():
           flush=True)
 
     # CoreML destructor race on Py3.13+; results already on disk.
+    # Branch the exit code on probe success so bench.sh:234 can surface
+    # device-placement failures via run_backend's rc tracking. Previously
+    # this was unconditional `os._exit(0)` and the bench treated a broken
+    # probe as ok.
     sys.stdout.flush()
-    os._exit(0)
+    os._exit(0 if result.get("device_placement_available") else 1)
 
 
 if __name__ == "__main__":
