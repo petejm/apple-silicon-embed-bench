@@ -26,7 +26,29 @@ if [ ! -f "$MODEL" ]; then
   exit 1
 fi
 
-echo '{ "model": "bge-small-en-v1.5-f16.gguf", "backend": "llama.cpp Metal (internal timing)", "note": "llama.cpp BERT-embed batches sentences (n_seq=66 typical) into one forward pass; total_time / n_sentences = realistic throughput", "buckets": {' > "$OUT.tmp"
+# Probe the GGUF dtype tag once — surface it in the result block so the
+# three-backend dtype comparison (MLX float16, CoreML compute_precision,
+# llama gguf_dtype) is auditable from the artifacts alone.
+gguf_dtype="unknown"
+if command -v gguf-dump >/dev/null 2>&1; then
+  gguf_dtype=$(gguf-dump --no-tensors "$MODEL" 2>/dev/null | grep -i "general.file_type\|general\.quantization_version\|tensor_data_layout" | head -3 | tr '\n' ';' || echo "unknown")
+fi
+if [ "$gguf_dtype" = "unknown" ]; then
+  # Fallback: parse the early init log of a tiny dry run for 'f16' / 'q8' / 'f32' markers.
+  init_log=$(mktemp)
+  echo "test" > "${init_log}.txt"
+  # shellcheck disable=SC2086
+  llama-embedding -m "$MODEL" -f "${init_log}.txt" $LLAMA_ARGS > /dev/null 2> "$init_log" || true
+  gguf_dtype=$(grep -oE "ftype +=? +[A-Za-z0-9_-]+|file type:[^,]*|all F16|all F32|all Q[0-9]_[0-9KS]+" "$init_log" 2>/dev/null | head -3 | tr '\n' ';' || echo "unknown")
+  [ -z "$gguf_dtype" ] && gguf_dtype="unparsed"
+  rm -f "$init_log" "${init_log}.txt"
+fi
+echo "[llama-v2] gguf_dtype: $gguf_dtype" >&2
+
+# JSON-escape the dtype string (replace quotes/backslashes with safe chars).
+gguf_dtype_esc=$(printf '%s' "$gguf_dtype" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+echo "{ \"model\": \"bge-small-en-v1.5-f16.gguf\", \"backend\": \"llama.cpp Metal (internal timing)\", \"gguf_dtype\": \"$gguf_dtype_esc\", \"note\": \"llama.cpp BERT-embed batches sentences (n_seq=66 typical) into one forward pass; total_time / n_sentences = realistic throughput\", \"buckets\": {" > "$OUT.tmp"
 
 first=1
 overall_ok=1

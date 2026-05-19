@@ -50,7 +50,31 @@ def main():
     with open(CORPUS) as f:
         buckets = json.load(f)
 
-    results = {"compute_unit_request": args.compute, "model": "bge-small-en-v1.5", "seq_len_pad": SEQ_LEN, "buckets": {}}
+    # Introspect compute precision. CoreML compiled-mlpackage may not always
+    # expose this cleanly; capture whatever attributes are available without
+    # crashing.
+    compute_precision_info = {}
+    try:
+        # On a freshly-loaded MLModel, certain attrs come from the spec.
+        # Load the spec eagerly here just to read metadata (cheap).
+        from coremltools.models.utils import _MLPACKAGE_EXTENSION  # noqa: F401
+        # ct.models.MLModel exposes .compute_precision lazily on some versions
+        _model_for_meta = ct.models.MLModel(MODEL, compute_units=cu)
+        for attr in ("compute_precision", "weight_precision"):
+            val = getattr(_model_for_meta, attr, None)
+            if val is not None:
+                compute_precision_info[attr] = str(val)
+        try:
+            compute_precision_info["specification_version"] = _model_for_meta.spec.specificationVersion
+        except Exception:
+            pass
+        del _model_for_meta
+    except Exception as e:
+        compute_precision_info["error"] = f"{type(e).__name__}: {e}"
+    print(f"[{args.compute}] coreml precision metadata: {compute_precision_info}", flush=True)
+
+    results = {"compute_unit_request": args.compute, "model": "bge-small-en-v1.5", "seq_len_pad": SEQ_LEN,
+               "compute_precision_info": compute_precision_info, "buckets": {}}
 
     # Cold start
     t0 = time.perf_counter()

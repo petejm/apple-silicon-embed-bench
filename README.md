@@ -50,7 +50,7 @@ Full 10-run variance tables (min/max/σ/CV per cell): [docs/results-m5-max.md](d
 ### Headline findings (with appropriate caveats)
 
 1. **ANE-via-naive-FP16-coremltools-trace is the slowest GPU-class path** on both M4 Pro and M5 Max for this model. Not the fastest. (Different conversion paths, especially INT8 + `ml-ane-transformers`, may differ; not tested here.)
-2. **ANE perf is roughly flat across M-generations** (~80-90 sent/s on both M4 Pro and M5 Max). GPU is where Apple is shipping perf gains: 3.3× CoreML GPU and 3.6× batched MLX from M4 Pro → M5 Max (n=1 cross-gen per chip variant; thermals not controlled — M4 Pro is a Mac mini, M5 Max is a MacBook).
+2. **ANE perf is roughly flat across M-generations** (~80-90 sent/s on both M4 Pro and M5 Max). GPU is where Apple is shipping perf gains: 3.3× CoreML GPU and 3.6× batched MLX from M4 Pro → M5 Max. **Form-factor-honest framing**: this is M5 Max (MacBook, 64 GB) vs M4 Pro (Mac mini, 24 GB) — a single-pair comparison across two different thermal envelopes. Thermal headroom is a confound, not just silicon generation. We do NOT claim "across M-generations" as a silicon-only result.
 3. **MLX dominates large-batch throughput** on M5 Max (2.6× faster than llama.cpp Metal at 100-in-one-call on the short bucket; 3.3× on medium, 1.6× on long — gap is largest at medium, not short). The gap shrinks on M4 Pro and at more realistic batch sizes.
 4. **The MLX-vs-llama gap is partly an Apple-API-exposure state**, not all closeable in llama.cpp code. llama.cpp build 9150 has `has tensor = false` in its Metal init log on macOS 26.5 — Apple's M5 tensor accelerators aren't being used. MLX uses them. A future llama.cpp release that re-enables tensor units may shrink the gap before any kernel work happens.
 
@@ -163,6 +163,18 @@ These bit us during development; documented so they don't bite you:
 3. **llama.cpp wall-time != inference time**. Process spawn / Metal pipeline init can take ~500ms. We use llama's `total_time` print instead.
 4. **CoreML mlpackage is traced at one fixed shape**. The bundled conversion uses batch=1, seq=512. Re-tracing requires modifying `convert_bge_coreml.py` and may fail on non-M5 silicon. Use `REBUILD_MLPACKAGE=1` only if you want to retrace.
 5. **`has tensor = false` in llama.cpp Metal init** on macOS 26.5 + brew build 9150. Apple's M5 tensor accelerators are temporarily disabled in this build. MLX uses them, llama.cpp doesn't — part of the headline MLX-vs-llama gap is this API-state, not closeable code.
+
+## Limitations
+
+Consolidated caveats — read these before generalizing any number in this README:
+
+- **Single conversion path tested**: HF → coremltools 9 → `torch.jit.trace` → FP16 mlpackage at batch=1/seq=512. Apple's `ml-ane-transformers` attention rewrite and INT8 quantization paths are documented ANE optima; neither is tested here. ANE numbers reflect this single conversion path, not ANE-in-general.
+- **Single model size**: bge-small-en-v1.5 only (33M params, BERT-12). Findings may not transfer to BGE-base, BGE-large, E5-mistral, or larger models where memory bandwidth and model size dominate differently.
+- **n=2 hardware variants**: M5 Max (MacBook, 64 GB) and M4 Pro (Mac mini, 24 GB). No M1, M2, M3, base M4, M-Ultra, or M-Max-non-MacBook data points. Cross-generation claims are based on one M5/M4 pair across different form factors.
+- **Cross-backend cosine parity check is bundled** (`bench/verify_parity.py`, invoked by `bench.sh`). If any backend fails the >= 0.999 cosine threshold against another, the result block surfaces it — but the four backends could still be doing subtly different things (different pooling, normalization, attention impl). The parity check is a sanity floor, not a proof of equivalence.
+- **MacBook thermals are not controlled to steady-state**. The M5 Max numbers are from a MacBook running browser / IDE / window manager — CV is 7.4–7.6% on CoreML GPU at medium/long buckets. The M4 Pro Mac mini variance is much tighter (CV < 0.5%) because of headless / cooled chassis. Form factor matters; we do not claim silicon-only deltas.
+- **No INT8 / `ml-ane-transformers` paths tested**. These are the documented ANE optima and would likely close (or reverse) the ANE-vs-GPU gap; we did not test them and our numbers don't speak to them.
+- **No dynamic-shape mlpackage tested**. CoreML is traced at fixed batch=1/seq=512. Variable-shape mlpackages punt to GPU on Apple silicon and have their own perf profile that this bench does not measure.
 
 ## Licensing
 

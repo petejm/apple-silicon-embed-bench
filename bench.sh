@@ -221,6 +221,22 @@ fi
 
 mkdir -p results
 
+# 4b. Cross-backend parity check (TR-3 D1/D3).
+# Runs before any per-backend bench so we abort early if the three backends
+# don't agree on the same function. results/parity.json gets surfaced in the
+# RESULT block.
+echo "==> cross-backend parity check (CoreML vs MLX vs llama)"
+if "$PYBIN" bench/verify_parity.py --allow-missing-backend; then
+  set_status "parity" "ok"
+else
+  parity_rc=$?
+  set_status "parity" "failed(rc=$parity_rc)"
+  echo "WARN: parity check failed (rc=$parity_rc). Per-backend numbers will still be" >&2
+  echo "      collected, but cross-backend ratio claims are not justified until parity" >&2
+  echo "      is restored. See results/parity.json for diagnostics." >&2
+fi
+echo
+
 run_backend() {
   local name="$1"; shift
   echo "==> $name"
@@ -326,6 +342,28 @@ print()
 print("**Device-placement probe status:**")
 for name in ("probe ane","probe gpu","probe cpu"):
     print(f"- {name}: {statuses.get(name, 'unknown')}")
+print()
+# Backend parity (cross-backend cosine + token-count histogram)
+print("**Backend parity (cross-backend cosine + token-count histogram):**")
+print(f"- parity: {statuses.get('parity', 'unknown')}")
+parity_path = R / "parity.json"
+if parity_path.exists():
+    try:
+        p = json.loads(parity_path.read_text())
+        cos = p.get("checks", {}).get("cosine", {}).get("pairs", {})
+        for pair, info in cos.items():
+            if info.get("ok"):
+                print(f"  - cosine {pair}: min={info.get('min', 0):.4f}, mean={info.get('mean', 0):.4f} (>= {p.get('cosine_threshold')})")
+            else:
+                err = info.get("error") or f"min={info.get('min', 0):.4f} < {p.get('cosine_threshold')}"
+                print(f"  - cosine {pair}: FAIL — {err}")
+        tc = p.get("checks", {}).get("token_counts", {})
+        if tc:
+            ref = tc.get("ref_backend", "?")
+            for name, ok in tc.get("matches", {}).items():
+                print(f"  - token-count {ref} vs {name}: {'ok' if ok else 'FAIL'}")
+    except Exception as e:
+        print(f"  - (could not read parity.json: {type(e).__name__}: {e})")
 print()
 print("| backend | short b=1 | short batched | medium b=1 | medium batched | long b=1 | long batched | cold (s) |")
 print("|---|---:|---:|---:|---:|---:|---:|---:|")

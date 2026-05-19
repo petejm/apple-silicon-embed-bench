@@ -68,6 +68,26 @@ Repeated `./bench.sh` 10 times back-to-back on the same M5 Max MacBook to charac
 
 Per-run raw data preserved in the `runs/` subdirectory of the test workspace.
 
+### Propagated σ on the main ratio claims
+
+Headline ratios elsewhere in this doc are stated as bare numbers (e.g. "MLX is 2.6× faster than llama.cpp Metal at short batched"). The full picture is the ratio plus its propagated uncertainty, computed from the per-cell σ values via ratio × √((σ_n/μ_n)² + (σ_d/μ_d)²):
+
+| Claim | Ratio ± σ | Range |
+|---|---:|---|
+| CoreML ANE short b=1 (M5/M4) | 1.113 ± 0.003 | [1.110 … 1.115] |
+| CoreML GPU short b=1 (M5/M4) | 3.306 ± 0.076 | [3.230 … 3.383] |
+| MLX b=1 short (M5/M4) | 1.464 ± 0.020 | [1.444 … 1.483] |
+| MLX b=100 short (M5/M4) | 3.566 ± 0.021 | [3.545 … 3.587] |
+| llama.cpp short batched (M5/M4) | 1.260 ± 0.018 | [1.243 … 1.278] |
+| llama.cpp medium batched (M5/M4) | 1.425 ± 0.060 | [1.364 … 1.485] |
+| llama.cpp long batched (M5/M4) | 1.761 ± 0.024 | [1.737 … 1.785] |
+| MLX vs llama short batched (M5 Max) | 2.635 ± 0.031 | [2.604 … 2.666] |
+| MLX vs llama medium batched (M5 Max) | 3.294 ± 0.132 | [3.162 … 3.426] |
+| MLX vs llama long batched (M5 Max) | 1.633 ± 0.019 | [1.614 … 1.652] |
+| MLX vs CoreML-GPU short batched (M5 Max) | 5.418 ± 0.127 | [5.291 … 5.545] |
+
+No two ratio ranges in this table overlap with the adjacent integer boundary, i.e. every "Nx" claim above is statistically distinct from the next integer ratio at 1-σ. The medium-bucket MLX-vs-llama gap is the noisiest (CV 4.0% on the llama denominator pulls the propagated σ up to 0.132 — still well clear of either 3× or 3.5×). Caveat: these are 1-σ ranges over the 10-outer-run distribution, not formal confidence intervals; multiple outer-run sweeps on different machines would refine them.
+
 **Independent corroboration of MLX b=100**: 3,099 sent/s × 32 tok = 99K real tokens/sec. At ~6.5 GFLOPs/sentence forward, that's ~20 TFLOPS sustained. M5 Max GPU FP16 peak is approximately 30-50 TFLOPS — putting MLX at 40-67% of theoretical peak, which is plausible for a fused-attention implementation. The number passes a basic sanity check. We have not independently verified the measurement against a second framework on this exact workload; doing so is on the open-issues list.
 
 ## Results
