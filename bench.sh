@@ -143,7 +143,7 @@ pip install --quiet --upgrade pip
 # Order matters: --no-deps for mlx-embeddings + mlx-vlm to break the
 # transformers-5+ transitive constraint, then explicit runtime deps from
 # requirements.txt, then anything mlx-embeddings imports at module load.
-pip install --quiet --no-deps mlx-embeddings==0.1.0 mlx-vlm==0.4.4 mlx-lm mlx-audio
+pip install --quiet --no-deps mlx-embeddings==0.1.0 mlx-vlm==0.4.4 mlx-lm==0.31.3 mlx-audio==0.4.3
 pip install --quiet -r requirements.txt
 # Runtime deps that mlx-vlm/mlx-audio import at module load are now pinned
 # inside requirements.txt (Pillow, fastapi, opencv-python, miniaudio,
