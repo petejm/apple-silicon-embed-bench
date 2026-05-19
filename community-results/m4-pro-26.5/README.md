@@ -19,6 +19,7 @@ Run date: 2026-05-18
 
 ## Notes
 
+- **JSON files in this directory are the first run of the 10-run sweep; the table numbers above are 10-run means.** Per-run data for all 10 runs is preserved on the canonical machine; submit a PR if you want the full set added here.
 - **Variance is dramatically tighter than M5 Max MacBook**. Most CVs under 1%, MLX is essentially noise-free (σ=1 sent/s on a 869 sent/s mean). This is consistent with the Mac mini's chassis cooling + lack of background-app contention vs a laptop running a browser / IDE / window manager.
 - Pre-built `.mlpackage` was downloaded from the GitHub release v1.0.0 (SHA256-verified). Conversion was not attempted on this hardware because `coremltools 9 + torch 2.7` produces a `TypeError: only 0-dimensional arrays can be converted to Python scalars` on M4 Pro for reasons unrelated to the bench. The .mlpackage was traced once on M5 Max and is the canonical artifact for cross-machine comparison.
 - All deps pinned per the repo's `requirements.txt`. mlx-embeddings + mlx-vlm installed with `--no-deps` per `bench.sh`'s automation, then transitive runtime deps (Pillow, fastapi, opencv-python, miniaudio, llguidance, uvicorn, datasets) pulled separately.

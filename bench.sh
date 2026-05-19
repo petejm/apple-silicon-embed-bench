@@ -141,9 +141,12 @@ pip install --quiet --upgrade pip
 # requirements.txt, then anything mlx-embeddings imports at module load.
 pip install --quiet --no-deps mlx-embeddings==0.1.0 mlx-vlm==0.4.4 mlx-lm mlx-audio
 pip install --quiet -r requirements.txt
-# Runtime deps that mlx-vlm/mlx-audio import at module load. Pulled with default
-# deps so their own transitive needs (sympy, networkx, etc.) come along.
-pip install --quiet Pillow fastapi opencv-python miniaudio llguidance uvicorn datasets
+# Runtime deps that mlx-vlm/mlx-audio import at module load are now pinned
+# inside requirements.txt (Pillow, fastapi, opencv-python, miniaudio,
+# llguidance, uvicorn, datasets). Previously these were unpinned `pip
+# install` calls here, which produced silent skew across community
+# submissions — pinning them in requirements.txt makes the venv-rebuild
+# guard (REQ_HASH) catch upgrades.
 echo "$REQ_HASH" > venv/.requirements.sha256
 
 # 2. Build corpus (deterministic; ~1 sec)
@@ -363,7 +366,11 @@ def cold(d):
     except (KeyError, TypeError): return "—"
 def llama_total(d, b):
     try:
-        runs = [r for r in d['buckets'][b]['runs'] if r.get('status') == 'ok']
+        # Default-accept untagged runs: older bench_llama_v2.sh outputs (and
+        # the M4 Pro community results, pre-status-backfill) didn't emit a
+        # status field. Tagged runs default to 'ok'; only explicit failures
+        # ('failed', 'parse_failed') are filtered out.
+        runs = [r for r in d['buckets'][b]['runs'] if r.get('status', 'ok') == 'ok']
         if len(runs) < 2: return "—"  # need at least 2 successful runs to drop run 1
         vals = [r['sent_per_s_total'] for r in runs]
         # _fmt_stats drops run 1 internally.
