@@ -102,10 +102,13 @@ for bucket in short medium long; do
     # `awk 'BEGIN{exit !(x+0 == 0)}'` returns 0 (success) when x parses as
     # numeric zero, so the `||` chain treats numeric-zero like empty.
     is_zero() { awk -v x="$1" 'BEGIN{exit !(x+0 == 0)}'; }
-    if [ -z "$prompt_eval_ms" ] || is_zero "$prompt_eval_ms" \
-       || [ -z "$prompt_tokens" ] || is_zero "$prompt_tokens" \
-       || [ -z "$total_ms" ] || is_zero "$total_ms"; then
-      echo "[llama-v2/$bucket/$r] FAILED — could not parse perf output (empty or numeric zero). Last log lines:" >&2
+    # total_ms is the load-bearing metric (used for sent_per_s_total which the
+    # community-results tables anchor on). prompt_eval_ms is sometimes legitimately
+    # 0 on short prompts due to ms-resolution rounding — that's a "no eval-only
+    # number available," not a parse failure. Only fail the run if total_ms is
+    # also missing/zero.
+    if [ -z "$total_ms" ] || is_zero "$total_ms"; then
+      echo "[llama-v2/$bucket/$r] FAILED — total_ms missing or zero. Last log lines:" >&2
       tail -10 "$log" >&2
       runs_json+="{\"run\":$r,\"status\":\"parse_failed\"},"
       bucket_ok=0
@@ -115,13 +118,29 @@ for bucket in short medium long; do
 
     # Sane defaults for optional fields
     [ -z "$max_n_seq" ] && max_n_seq=0
+    [ -z "$prompt_tokens" ] && prompt_tokens=0
 
-    sent_per_s_total=$(python3 -c "t=$total_ms; print(100.0/(t/1000.0) if t>0 else 0)")
-    sent_per_s_eval=$(python3 -c "t=$prompt_eval_ms; print(100.0/(t/1000.0) if t>0 else 0)")
-    tokens_per_s=$(python3 -c "t=$prompt_eval_ms; n=$prompt_tokens; print(n/(t/1000.0) if t>0 else 0)")
+    sent_per_s_total=$(python3 -c "t=$total_ms; print(100.0/(t/1000.0))")
+    # eval-only metrics: emit null (JSON) when prompt_eval_ms rounds to 0 or is
+    # missing — distinguishes "no data" from "real zero throughput."
+    if [ -z "$prompt_eval_ms" ] || is_zero "$prompt_eval_ms"; then
+      prompt_eval_ms_json="null"
+      sent_per_s_eval="null"
+      tokens_per_s="null"
+      eval_disp="—"
+    else
+      prompt_eval_ms_json="$prompt_eval_ms"
+      sent_per_s_eval=$(python3 -c "t=$prompt_eval_ms; print(100.0/(t/1000.0))")
+      if is_zero "$prompt_tokens"; then
+        tokens_per_s="null"
+      else
+        tokens_per_s=$(python3 -c "t=$prompt_eval_ms; n=$prompt_tokens; print(n/(t/1000.0))")
+      fi
+      eval_disp="${prompt_eval_ms}ms"
+    fi
 
-    runs_json+="{\"run\":$r,\"status\":\"ok\",\"prompt_eval_ms\":$prompt_eval_ms,\"prompt_tokens\":$prompt_tokens,\"total_ms\":$total_ms,\"n_batches\":$n_batches,\"max_n_seq\":$max_n_seq,\"sent_per_s_total\":$sent_per_s_total,\"sent_per_s_eval\":$sent_per_s_eval,\"tokens_per_s\":$tokens_per_s},"
-    echo "[llama-v2/$bucket/$r] eval=${prompt_eval_ms}ms (${prompt_tokens}tok) total=${total_ms}ms sent/s_total=$sent_per_s_total" >&2
+    runs_json+="{\"run\":$r,\"status\":\"ok\",\"prompt_eval_ms\":$prompt_eval_ms_json,\"prompt_tokens\":$prompt_tokens,\"total_ms\":$total_ms,\"n_batches\":$n_batches,\"max_n_seq\":$max_n_seq,\"sent_per_s_total\":$sent_per_s_total,\"sent_per_s_eval\":$sent_per_s_eval,\"tokens_per_s\":$tokens_per_s},"
+    echo "[llama-v2/$bucket/$r] eval=${eval_disp} (${prompt_tokens}tok) total=${total_ms}ms sent/s_total=$sent_per_s_total" >&2
     rm -f "$log"
   done
   runs_json="${runs_json%,}"
