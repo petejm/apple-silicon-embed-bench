@@ -10,7 +10,7 @@
 # submissions (numpy 2.x ABI breaks, huggingface-hub URL endpoints changing).
 # Bump these deliberately; never let pip pick.
 #
-# Versions captured from the canonical M4 Pro venv (defcon-mini, Python 3.12)
+# Versions captured from the canonical M4 Pro venv (Python 3.12)
 # that produced the published m4-pro-26.5 community-results JSON. M5 Max
 # MacBook venv is on the same pins (verify before each canonical-numbers run).
 numpy==2.4.5
